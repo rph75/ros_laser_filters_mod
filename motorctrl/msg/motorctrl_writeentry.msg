@@ -1,0 +1,2 @@
+time time         #The motor controller time when to hit the target encoder value / until when to run at target speed
+int32[] target     #The 4 target encoder values / target speed (in encoder ticks per second)

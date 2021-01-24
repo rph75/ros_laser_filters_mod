@@ -1,0 +1,3 @@
+---
+time time         #The motor controller time
+int32[] speed     #The 4 speed values (in encoder ticks per sec)

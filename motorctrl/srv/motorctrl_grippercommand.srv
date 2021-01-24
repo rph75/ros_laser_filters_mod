@@ -1,0 +1,4 @@
+string action       #MOVE: Move position, OPEN: open gripper, CLOSE:  close gripper
+duration duration   #Duration of this action
+float32 position    #Only relevant for action move position
+---

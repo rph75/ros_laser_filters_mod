@@ -1,0 +1,6 @@
+scan_filter_chain:
+- name: filter_gripper
+  type: laser_filters/LaserScanAngularBoundsFilterNeg
+  params:
+    lower_angle: -0.4363
+    upper_angle: 1.047166667

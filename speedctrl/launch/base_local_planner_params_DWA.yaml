@@ -1,0 +1,49 @@
+controller_frequency: 5.0
+planner_frequency: 5.0
+recovery_behavior_enabled: true
+clearing_rotation_allowed: false
+base_local_planner: dwa_local_planner/DWAPlannerROS
+
+DWAPlannerROS:
+  max_vel_trans: 0.21   # The absolute value of the maximum translational velocity for the robot in m/s
+  min_vel_trans: 0.00   # The absolute value of the minimum translational velocity for the robot in m/s
+  max_vel_x: 0.21
+  min_vel_x: -0.21
+  max_vel_y: 0
+  min_vel_y: 0
+  #max_vel_theta: 0.23
+  #min_vel_theta: -0.23
+  max_vel_theta: 0.23
+  min_vel_theta: -0.23
+  min_in_place_vel_theta: 0.10
+  #acc_lim_theta: 0.05
+  #acc_lim_x: 0.08
+  #acc_lim_y: 0.0
+
+  escape_vel: -0.05
+  holonomic_robot: false
+  yaw_goal_tolerance: 0.1
+  xy_goal_tolerance: 0.05
+
+  latch_xy_goal_tolerance: false
+  pdist_scale: 0.8
+  gdist_scale: 0.6
+  meter_scoring: true
+  prefer_forward_cost_function: 0.0
+
+  heading_lookahead: 1.0
+  heading_scoring: false
+  heading_scoring_timestep: 0.8
+  occdist_scale: 0.1
+  oscillation_reset_dist: 0.05
+  publish_cost_grid_pc: false
+  prune_plan: true
+
+  #sim_time: 20
+  #sim_granularity: 0.025
+  #angular_sim_granularity: 0.025
+  vx_samples: 8  #Not quite sure what this is: The number of samples to use when exploring the x velocity space
+  vth_samples: 20
+  dwa: true
+  use_dwa: true
+  simple_attractor: false

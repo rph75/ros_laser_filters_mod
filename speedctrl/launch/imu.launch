@@ -1,0 +1,21 @@
+<?xml version="1.0"?>
+
+<launch>
+  <machine name="robot" address="jetson" user="roman" password="Moj0Moj0" env-loader="/home/roman/catkin_ws/src/speedctrl/launch/jetson_env_loader.sh"/>
+  <machine name="main" address="desktop" user="roman"/>
+
+    <!-- reroute the scanmatch_odom from hector to odom used by the planner -->
+  <!--
+  <remap from="/scanmatch_odom" to="/odom"/>
+  -->
+
+  <node pkg="i2c" type="i2cService.py" name="i2c" output="screen" machine="robot">
+  </node>
+
+  <node pkg="battery" type="batteryNode.py" name="battery" output="screen" machine="main">
+  </node>
+
+  <node pkg="imu" type="imu_node.py" name="imu_node" output="screen" machine="main">
+  </node>
+
+</launch>
