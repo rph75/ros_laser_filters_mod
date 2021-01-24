@@ -1,0 +1,8 @@
+<?xml version="1.0"?>
+
+<launch>
+
+  <node pkg="i2c" type="i2cService.py" name="i2c" output="screen">
+  </node>
+
+</launch>

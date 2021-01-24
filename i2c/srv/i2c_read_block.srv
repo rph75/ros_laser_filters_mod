@@ -1,0 +1,8 @@
+uint8 address
+uint8 register
+uint16 count
+#Number of bytes to be requested in a single i2c read call (in case the count exceeds 32)
+uint16 block_size
+---
+bool success
+uint8[] data

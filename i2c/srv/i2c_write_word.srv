@@ -1,0 +1,5 @@
+uint8 address
+uint8 register
+uint16 word
+---
+bool success
