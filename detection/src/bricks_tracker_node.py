@@ -10,7 +10,7 @@ import operator
 import coordinates
 from detection.msg import detection
 from std_msgs.msg import Header,ColorRGBA
-from geometry_msgs.msg import PointStamped, Point, Pose, PoseStamped, Quaternion, Twist, Vector3, Polygon, PolygonStamped, Point32
+from geometry_msgs.msg import PointStamped, Point, PoseArray, Pose, PoseStamped, Quaternion, Twist, Vector3, Polygon, PolygonStamped, Point32
 from visualization_msgs.msg import Marker, MarkerArray
 from move_base_msgs.msg import MoveBaseActionGoal, MoveBaseGoal, MoveBaseAction
 from actionlib_msgs.msg import GoalID, GoalStatus
@@ -122,6 +122,21 @@ GRIPPER_GRIP_TIME= Duration.from_sec(1.5) # time to open/close gripper
 GOAL_STATUS_LOG_INTERVAL = Duration.from_sec(5.0)
 enc_per_m=11500.0 #encoder units per cm #TODO: centralize this value (shared with odom_data)
 
+#Tolerance of base_link to waypoint before the target waypoint is updated to the next one
+WAYPOINT_TOLERANCE = 0.5
+#Defines a path which the robot should follow if there is no brick around to collect
+IDLE_WAYPOINTS = [
+  Pose(position=Point(x= 1.38682508469,y= -2.93354725838,z= 0.0),orientation=Quaternion(x= 0.0,y= 0.0,z=-0.688960795656,w= 0.724798607924)),
+  Pose(position=Point(x= 5.36411476135,y=-5.82175683975,z= 0.0),orientation=Quaternion(x= 0.0,y=0.0,z= 0.0202973180118,w= 0.99979398822)),
+  Pose(position=Point(x= 6.97185945511,y=-8.34920787811,z= 0.0),orientation=Quaternion(x= 0.0,y=0.0,z= 0.711992995144,w= 0.702186566994)),
+  Pose(position=Point(x= 5.53210258484,y=-1.2927801609,z= 0.0),orientation=Quaternion(x= 0.0,y=0.0,z= -0.999803428543,w= 0.0198268573953)),
+  Pose(position=Point(x= 1.45372509956,y=-1.14178466797,z= 0.0),orientation=Quaternion(x= 0.0,y=0.0,z= 0.948261213466,w=  0.317491214109)),
+  Pose(position=Point(x= 2.47082614899,y= 4.60656261444,z= 0.0),orientation=Quaternion(x= 0.0,y=0.0,z= 0.00465937461482,w= 0.999989145055)),
+  Pose(position=Point(x= 3.71764445305,y=4.6676235199,z= 0.0),orientation=Quaternion(x= 0.0,y=0.0,z= -0.68848681591,w= 0.72524885682)),
+  Pose(position=Point(x= 6.06605052948,y= -0.270807504654,z= 0.0),orientation=Quaternion(x= 0.0,y=0.0,z= -0.683218452874,w= 0.730214040986)),
+]
+
+
 class Brick:
     def __init__(self,position,color,radius,count,id=-1):
         self.id=id
@@ -150,6 +165,7 @@ class Node:
         self.brick_goal = None
         self.brick_id = 1
         self.target_pose = None
+        self.next_idle_waypoint = None
         self.pool = []
         self.move_base_action = actionlib.SimpleActionClient('move_base',MoveBaseAction)
         self.listener = tf.TransformListener()
@@ -164,6 +180,7 @@ class Node:
         self.camera_area_near_small_pub = rospy.Publisher("camera_area_near_small", PolygonStamped, queue_size=10)
         self.camera_area_far_small_pub = rospy.Publisher("camera_area_far_small", PolygonStamped, queue_size=10)
         self.gripper_area_pub = rospy.Publisher("gripper_area", PolygonStamped, queue_size=10)
+        self.idle_waypoints_pub = rospy.Publisher("idle_waypoints", PoseArray, queue_size=10)
         interval = rospy.Duration.from_sec(0.5)
         rospy.Timer(interval, self.callback_tim)
         self.move_base_action.cancel_goal() #Cancel any previous goal, such that when this node gets started we are clean
@@ -184,6 +201,8 @@ class Node:
         ps_gripper=PolygonStamped(header=Header(frame_id="gripper"),polygon=self.convert_poly_to_msg(gripper_poly))
         self.gripper_area_pub.publish(ps_gripper)
 
+        self.idle_waypoints_pub.publish(PoseArray(header=Header(frame_id="map"),poses=IDLE_WAYPOINTS))
+
         current_time = rospy.Time.now()
         if current_time < self.wait_until:
             #Timer still ticking
@@ -201,18 +220,17 @@ class Node:
         #pose_map = self.listener.transformPose("map", PoseStamped(header=Header(frame_id = "base_link",stamp=current_time),pose=Pose(position=Point(x=0,y=0,z=0),orientation=Quaternion(0,0,0,1)))).pose;
         pose_gripper_map = self.listener.transformPose("map", PoseStamped(header=Header(frame_id = "gripper",stamp=current_time),pose=Pose(position=Point(x=0,y=0,z=0),orientation=Quaternion(0,0,0,1)))).pose;
         pose_gripper_base = self.listener.transformPose("base_link", PoseStamped(header=Header(frame_id = "gripper",stamp=current_time),pose=Pose(position=Point(x=0,y=0,z=0),orientation=Quaternion(0,0,0,1)))).pose;
+        pose_base_map = self.listener.transformPose("map", PoseStamped(header=Header(frame_id = "base_link",stamp=current_time),pose=Pose(position=Point(x=0,y=0,z=0),orientation=Quaternion(0,0,0,1)))).pose;
         # Get the gripper window
         gripper_poly_map = self.transform_poly(gripper_poly, current_time, "gripper", "map")
-
         if self.status in [STATUS_IDLE,STATUS_APPROACHING,STATUS_MOVINGBASE]:
             # Check if the brick still exists and is still reachable - otherwise cancel goal (if there is any) and go back to idle status
             with self.lock:
                 if self.brick_goal is not None and (self.brick_goal not in self.pool or self.brick_goal.unreachable):
                     rospy.loginfo(rospy.get_name() + " brick {} is no longer a valid goal - cancelling ".format(self.brick_goal.id))
-                    if self.status == STATUS_MOVINGBASE:
-                        self.move_base_action.cancel_goal()
-                    self.status = STATUS_IDLE
+                    self.move_base_action.cancel_goal() #Cancel any current goal - just in case
                     self.brick_goal = None
+                    self.status = STATUS_IDLE
                     return
         # Check if we see any object in the gripper area - if yes, grab it (no matter of what the current target object is)
         if self.status in [STATUS_IDLE,STATUS_MOVINGBASE]:
@@ -222,7 +240,7 @@ class Node:
                 for b in self.pool:
                     if not b.unreachable:
                         if self.ray_tracing(b.position, gripper_poly_map):
-                            d = math.sqrt((b.position.x-pose_gripper_map.position.x)**2+(b.position.y-pose_gripper_map.position.y)**2)
+                            d = self.calc_distance(b,pose_gripper_map);
                             if closest_brick is None or d < distance:
                                 distance = d
                                 closest_brick = b
@@ -230,8 +248,7 @@ class Node:
                 if closest_brick is not None:
                     rospy.loginfo(rospy.get_name() + " Found brick {} in gripper area - approach it ".format(closest_brick.id))
                     self.brick_goal = closest_brick
-                    if self.status == STATUS_MOVINGBASE:
-                        self.move_base_action.cancel_goal()
+                    self.move_base_action.cancel_goal() #Cancel any current goal - just in case
                     self.status = STATUS_APPROACHING
                     return
         #
@@ -241,20 +258,39 @@ class Node:
                 closest_brick = None
                 for b in self.pool:
                     if not b.unreachable:
-                        d = math.sqrt((b.position.x-pose_gripper_map.position.x)**2+(b.position.y-pose_gripper_map.position.y)**2)
+                        d = self.calc_distance(b, pose_gripper_map);
                         if closest_brick is None or d < distance:
                             distance = d
                             closest_brick = b
             # check if we found a closest brick
             if closest_brick is not None:
                 rospy.loginfo(rospy.get_name() + " Closest brick is {}, sending goal".format(closest_brick.id))
+                #self.next_idle_waypoint = None # reset idle path
                 self.brick_goal = closest_brick
                 self.move_base_to_brick(current_time,pose_gripper_map,pose_gripper_base)
                 return
             else:
-                # No bricks around - what could we do?
-                # For now do nothing special, just wait a bit
-                self.wait_until = current_time + rospy.Duration.from_sec(2.0)
+                # No bricks around - follow an idle path
+                updated_waypoint = None
+                if self.next_idle_waypoint is None:
+                        #Find the closest waypoint from current position (this is for the very first time)
+                        for waypoint in IDLE_WAYPOINTS:
+                            if updated_waypoint is None or self.calc_distance(pose_base_map,waypoint) < self.calc_distance(pose_base_map,updated_waypoint):
+                                updated_waypoint = waypoint
+                        rospy.loginfo(rospy.get_name() + " found closest waypoint {}".format(updated_waypoint))
+                else:
+                    if self.calc_distance(pose_base_map,self.next_idle_waypoint) < WAYPOINT_TOLERANCE:
+                        # We are quite close to the waypoint - update goal to next waypoint before the robot will start tricks to reach goal exactly
+                        i = (IDLE_WAYPOINTS.index(self.next_idle_waypoint)+1) % len(IDLE_WAYPOINTS)
+                        updated_waypoint = IDLE_WAYPOINTS[i]
+                        rospy.loginfo(rospy.get_name() + " close to waypoint {}, going to next waypoint {}, {}".format(self.next_idle_waypoint,i,updated_waypoint))
+
+                if updated_waypoint is not None:
+                    #Send target to next waypoint
+                    rospy.loginfo(rospy.get_name() + " going to waypoint {}".format(updated_waypoint))
+                    self.next_idle_waypoint = updated_waypoint
+                    self.move_base_action.send_goal(MoveBaseGoal(target_pose=PoseStamped(header=Header(frame_id="map", stamp=current_time),pose=updated_waypoint)))
+                #
                 return
 
         if self.status==STATUS_MOVINGBASE:
@@ -262,8 +298,7 @@ class Node:
             if goal_status == GoalStatus.PENDING or goal_status == GoalStatus.ACTIVE:
                 #Still moving
                 # When getting close to target (brick_goal is in far camera, and close enough): Adjust the goal, as we're getting more precision
-                d = math.sqrt((self.brick_goal.position.x - pose_gripper_map.position.x) ** 2 + (
-                            self.brick_goal.position.y - pose_gripper_map.position.y) ** 2)
+                d = self.calc_distance(self.brick_goal,pose_gripper_map);
                 if d<self.goal_set_at_distance*0.7:
                     rospy.loginfo(rospy.get_name() + " Readjusting goal because I am getting closer (now at {} m)".format(d))
                     self.move_base_to_brick(current_time, pose_gripper_map, pose_gripper_base)
@@ -271,7 +306,7 @@ class Node:
             if goal_status != GoalStatus.SUCCEEDED:
                 # Finished, but with error - mark this as unreachable orientation
                 rospy.loginfo(rospy.get_name() + " Could not reach goal")
-                self.brick_goal.attempted_orientations.append(self.target_pose.pose.orientation)
+                self.brick_goal.attempted_orientations.append(self.target_pose.orientation)
             # reached the goal or aborted - go back to idle mode (which will initate gripper if it is in the right place)
             else:
                 rospy.loginfo(rospy.get_name() + " Goal reached")
@@ -351,8 +386,11 @@ class Node:
                 self.brick_goal.unreachable = True
             self.brick_goal = None
             self.status = STATUS_IDLE
-
             return
+
+    def calc_distance(self,p1,p2):
+        return math.sqrt((p1.position.x-p2.position.x) ** 2 + (p1.position.y-p2.position.y) ** 2)
+
 
     def move_base_to_brick(self,current_time,pose_gripper_map,pose_gripper_base):
         # Find an orientation which was not yet attempted, preferrably the current robot's orientation, otherwise
@@ -386,16 +424,14 @@ class Node:
         xb = xg + f * math.sin(alpha_rad)
         yb = yg - f * math.cos(alpha_rad)
         target_pose_base_map = Pose(position=Point(x=xb, y=yb, z=0.0), orientation=orientation)
-        header = Header(frame_id="map", stamp=current_time)
-        target_posestamped_base_map = PoseStamped(header=header, pose=target_pose_base_map)
         #rospy.loginfo(rospy.get_name() + " Going with base link to coordinates {}".format(target_pose_base_map))
         rospy.loginfo(rospy.get_name() + " Sending goal to move base")
         self.status = STATUS_MOVINGBASE
-        self.target_pose = target_posestamped_base_map
+        self.target_pose = target_pose_base_map
         #Update the distance to the brick when goal was last set
-        self.goal_set_at_distance = math.sqrt((self.brick_goal.position.x - pose_gripper_map.position.x) ** 2 + (self.brick_goal.position.y - pose_gripper_map.position.y) ** 2)
+        self.goal_set_at_distance = self.calc_distance(self.brick_goal,pose_gripper_map);
         #Send the action
-        self.move_base_action.send_goal(MoveBaseGoal(target_pose=self.target_pose))
+        self.move_base_action.send_goal(MoveBaseGoal(target_pose=PoseStamped(header=Header(frame_id="map", stamp=current_time), pose=self.target_pose)))
         return
 
     def convert_poly_to_msg(self,poly):
@@ -447,7 +483,7 @@ class Node:
                 i = len(new_bricks) - 1
                 while i >= 0:
                     n = new_bricks[i]
-                    distance = math.sqrt((n.position.x - b.position.x) ** 2 + (n.position.y - b.position.y) ** 2)
+                    distance = self.calc_distance(n,b)
                     rospy.loginfo(rospy.get_name() + " Distance between new and {} is {}, sum of radius is {}".format(b.id,distance,n.radius+b.radius))
                     if distance < n.radius+b.radius:
                         rospy.loginfo(rospy.get_name() + " new and {} overlap, removing new".format(b.id))

@@ -1,6 +1,5 @@
 <?xml version="1.0"?>
 <launch>
-  <machine name="robot" address="jetson" user="roman" password="Moj0Moj0" env-loader="/home/roman/catkin_ws/src/speedctrl/launch/jetson_env_loader.sh"/>
 
     <node pkg="move_base" type="move_base" respawn="true" name="move_base" output="screen" >
    <!-- <node pkg="move_base" type="move_base" respawn="true" name="move_base" output="screen" machine="robot_or_main"> -->
