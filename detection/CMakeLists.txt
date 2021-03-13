@@ -13,6 +13,7 @@ find_package(catkin REQUIRED COMPONENTS
   message_generation
   geometry_msgs
   std_msgs
+  std_srvs
 )
 
 ## System dependencies are found with CMake's conventions
@@ -51,7 +52,8 @@ find_package(catkin REQUIRED COMPONENTS
 ## Generate messages in the 'msg' folder
 add_message_files(
    FILES
-   detection.msg
+   singledetection.msg
+   detectionarray.msg
    detectionimage.msg
 )
 
@@ -74,6 +76,7 @@ generate_messages(
    DEPENDENCIES
    std_msgs
    geometry_msgs
+   std_srvs
 )
 
 ###################################
