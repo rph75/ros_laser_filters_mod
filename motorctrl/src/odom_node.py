@@ -1,5 +1,7 @@
 #!/usr/bin/env python
 
+#Odom node reads out odometry data from the encoders and publishes that data
+
 from math import cos, sin
 import rospy
 import tf

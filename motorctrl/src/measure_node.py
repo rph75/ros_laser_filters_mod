@@ -1,5 +1,10 @@
 #!/usr/bin/env python
 
+#This node is used to calibrate odometry of the robot
+#It will perform a couple of movements, using different speed configurations (patterns)
+#And measure how far it got. This data is then saved to a CSV file which can later be used to process
+#And calibrate the odometry
+
 import rospy,math
 from geometry_msgs.msg import Twist, PoseStamped
 from nav_msgs.msg import Odometry

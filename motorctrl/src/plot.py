@@ -1,3 +1,5 @@
+#This python plts the function from motor speed to robot speed / angular speed
+
 import bisect
 import numpy as np
 import matplotlib.pyplot as plt

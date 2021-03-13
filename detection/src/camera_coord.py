@@ -1,7 +1,9 @@
 import cv2
 from geometry_msgs.msg import Point
 
+#Area where we can trust a detection so we could use the gripper
 STABLE_POLY = [Point(x=0.01, y=0.01), Point(x=0.01, y=-0.14), Point(x=0.05, y=-0.17), Point(x=0.18, y=-0.18),Point(x=0.12, y=-0.06), Point(x=2.0, y=-1.0), Point(x=2.0, y=1.25), Point(x=0.12, y=0.09),Point(x=0.08, y=0.02)]
+
 # Line data is obtained from measures.ods. Assumption is that all lines are straight
 # tuples are (k1,k2), where y_pix = k1 + k2 * x_pix
 # horizontal lines are mapping from the x in meters (camera coordinate frame) to the tuples (k1,k2)

@@ -32,7 +32,7 @@ def add_to_point(point,offset):
     return Point(x=point.x+offset[0],y=point.y+offset[1],z=point.z+offset[1])
 
 # Gripper area, relative to gripper coordinate frame
-GRIPPER_POLY = [Point(x=-0.05, y=-0.11, z=0.0), Point(x=0.20, y=-0.11, z=0.0), Point(x=0.20, y=0.11, z=0.0), Point(x=-0.05, y=0.11, z=0.0)]
+GRIPPER_POLY = [Point(x=-0.05, y=-0.11, z=0.0), Point(x=0.25, y=-0.11, z=0.0), Point(x=0.25, y=0.11, z=0.0), Point(x=-0.05, y=0.11, z=0.0)]
 
 #near_poly = [Point(x=0.15, y=0.10, z=0.0), Point(x=0.35, y=0.10, z=0.0), Point(x=0.35, y=-0.10, z=0.0), Point(x=0.15, y=-0.10, z=0.0)]
 #far_poly = [Point(x=0.40, y=0.20, z=0.0), Point(x=1.00, y=0.80, z=0.0), Point(x=1.00, y=-0.80, z=0.0), Point(x=0.40, y=-0.20, z=0.0)]

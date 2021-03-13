@@ -216,7 +216,8 @@ class Node:
 
         #
         # TODO: This is a very simple approximation to map angular speed and path speed to controller delta and speed
-        # Suggestion for improvements: Either interpolate, or use linear regression to match two planes, and then intersect the two plances
+        # We trust the navigation layer to constantly optimze this if the speed commands do not match the reality
+        # Suggestion for improvements: Use odometry_data.py to get a better approximation
         controller_speed = path_speed
         controller_delta = ang_speed / 3.657
         # send to controller
