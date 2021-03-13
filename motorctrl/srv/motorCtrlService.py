@@ -80,6 +80,7 @@ def readpos(request):
 
 def writepos(request):
     global motor_now_ms
+    rospy.loginfo(rospy.get_name() + " write pos command received")
     payload = [0x00]  # Send target position
     append_byte(payload, len(request.writeposentries))  # Send n targets
     for i in range(0, len(request.writeposentries)):
@@ -100,6 +101,7 @@ def writepos(request):
 
 def writespeed(request):
     #TODO: recycle code with writepos
+    rospy.loginfo(rospy.get_name() + " write speed command received")
     global motor_now_ms
     payload = [0x01]  # Send target speed
     append_byte(payload, len(request.writespeedentries))  # Send n targets

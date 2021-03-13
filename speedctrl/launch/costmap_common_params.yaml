@@ -4,7 +4,7 @@ footprint: [[0.185, 0.15], [-0.185, 0.15], [-0.185, -0.15], [0.185, -0.15]]
 #robot_radius: 0.24
 
 #Had to manually increase the tolerance
-transform_tolerance: 1.0
+transform_tolerance: 3.0
 
 observation_sources: laser_scan_sensor
 

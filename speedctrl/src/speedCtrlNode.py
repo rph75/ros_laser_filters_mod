@@ -7,10 +7,13 @@ from motorctrl.msg import motorctrl_writeentry
 
 #TODO: Move to params file
 
+enc_per_m=11500.0 #encoder units per cm #TODO: centralize this value (shared with odom_data)
+
 # Duration during which the robot will move, on receipt of a Twist message on cmd_vel.
 # This includes the acceleration, the peak, and the deceleration phases
 # For continuous movement, this should be a bit longer than the publish interval to the cmd_vel topic
-enc_per_m=11500.0 #encoder units per cm #TODO: centralize this value (shared with odom_data)
+# Note - it is currently not known how often move_base publishes the cmd_vel - but it seems rather infrequent when robot does in-place rotations - hence upping this to 30 seconds
+# Note - if this is too large, sometimes move_base is stuck and doesn't send any updated, and then the robot goes mad...
 INTERVAL_SECS = 2
 MAX_ANG_SPEED=0.26
 MAX_SPEED=0.15

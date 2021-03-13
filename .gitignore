@@ -1,0 +1,10 @@
+/.project
+*.pyc
+
+#ROS repositories imported from elsewhere - and not locally modified
+hector_slam/
+navigation/
+navigation_msgs/
+rplidar_ros/
+rtabmap_ros/
+teb_local_planner/

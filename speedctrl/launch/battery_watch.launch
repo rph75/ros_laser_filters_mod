@@ -1,0 +1,17 @@
+<?xml version="1.0"?>
+
+<launch>
+
+  <machine name="jetson" address="jetson" user="roman" password="Moj0Moj0" env-loader="/home/roman/catkin_ws/src/speedctrl/launch/jetson_env_loader.sh"/>
+  <machine name="pi4" address="pi4" user="roman" password="Moj0Moj0" env-loader="/home/roman/catkin_ws/src/speedctrl/launch/jetson_env_loader.sh"/>
+  <machine name="desktop" address="desktop" user="roman"/>
+
+  <node pkg="i2c" type="i2cService.py" name="i2c" output="screen" machine="jetson">
+  </node>
+
+  <node pkg="battery" type="batteryNode.py" name="battery" output="screen" machine="jetson">
+  </node>
+
+  <node pkg="rviz" type="rviz" name="rviz" args="-d $(find speedctrl)/launch/rviz_config_battery.rviz" machine="desktop"/>
+
+</launch>

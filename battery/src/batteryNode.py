@@ -76,6 +76,9 @@ class Node:
         brain_A = self.getCurrent_A(BRAIN_CHANNEL)
         brain_W = brain_V * brain_A
         #
+        brainshunt_V = self.getShuntVoltage_V(BRAIN_CHANNEL)
+        rospy.loginfo(rospy.get_name() + " Brain bus: {:.2f} V, Brain: {:.2f} V / {:.2f} A".format(brain_V,brain_V - brainshunt_V,brain_A))
+        #
         # Publish battery message
         batteryState = BatteryState()
         batteryState.voltage = batt_V
@@ -88,9 +91,9 @@ class Node:
         if (current_time>self.last_log+rospy.Duration.from_sec(LOG_INTERVAL)):
             self.last_log=current_time
             if batt_V < MIN_BATT_VOLTAGE:
-                rospy.logwarn(rospy.get_name() + " Battery voltage critically low {:.2f}: ".format(batt_V))
+                rospy.logwarn(rospy.get_name() + " Battery voltage critically low: {:.2f}".format(batt_V))
             else:
-                rospy.loginfo(rospy.get_name() + " Battery voltage ok {:.2f}: ".format(batt_V))
+                rospy.loginfo(rospy.get_name() + " Battery voltage ok: {:.2f}".format(batt_V))
 
         # Send battery image
         if (current_time>self.last_blink+rospy.Duration.from_sec(BLINK_INTERVAL)):

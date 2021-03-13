@@ -1,9 +1,8 @@
-controller_frequency: 5.0
-planner_frequency: 5.0
-recovery_behavior_enabled: true
+controller_frequency: 5.0  #default: 20 (control loop is to plan path on short horizon) - setting this to high values, e.g. 10, results in the robot to drift off the path, but would like to know why
+planner_frequency: 5.0  #default: 0 (0 means the global plan is computed only when a goal is set)
+recovery_behavior_enabled: false
 clearing_rotation_allowed: false
 base_local_planner: teb_local_planner/TebLocalPlannerROS
-
 
 TebLocalPlannerROS:
     odom_topic: odom
@@ -12,14 +11,14 @@ TebLocalPlannerROS:
     # Trajectory
 
     teb_autosize: True
-    dt_ref: 0.3
-    dt_hysteresis: 0.1
+    dt_ref: 0.3   #default: 0.3
+    dt_hysteresis: 0.1 #default: 0.1
     global_plan_overwrite_orientation: True
-    max_global_plan_lookahead_dist: 3.0
-    feasibility_check_no_poses: 5
+    max_global_plan_lookahead_dist: 3.0 #default: 3
+    feasibility_check_no_poses: 4 #default: 4
 
     # Robot
-    transform_tolerance: 5.0
+    #transform_tolerance: 5.0
     max_vel_x: 0.21
     max_vel_x_backwards: 0.21
     #max_vel_theta: 0.23
@@ -34,51 +33,55 @@ TebLocalPlannerROS:
 
     # GoalTolerance
 
-    xy_goal_tolerance: 0.2
-    yaw_goal_tolerance: 0.4
-    free_goal_vel: False
+    xy_goal_tolerance: 0.1
+    yaw_goal_tolerance: 0.3
+    #Too much precision in the goal tolerance may result in dumb oscillation when the target was reached
+    #xy_goal_tolerance: 0.02
+    #yaw_goal_tolerance: 0.09 #5 degrees
+    #free_goal_vel: False
 
     # Obstacles
 
     min_obstacle_dist: 0.1
-    inflation_dist: 0.2
+    inflation_dist: 0.5
     include_costmap_obstacles: True
     costmap_obstacles_behind_robot_dist: 0.5
-    obstacle_poses_affected: 30
-    costmap_converter_plugin: ""
+    obstacle_poses_affected: 30  #default: 30
+    costmap_converter_plugin: ""   #default: "" - empty meaning no costmap converter used
     costmap_converter_spin_thread: True
     costmap_converter_rate: 5
 
     # Optimization
 
-    no_inner_iterations: 5
-    no_outer_iterations: 4
-    optimization_activate: True
-    optimization_verbose: False
-    penalty_epsilon: 0.05
+    no_inner_iterations: 5  #default: 5
+    no_outer_iterations: 4  #default: 4
+    optimization_activate: True   #???
+    optimization_verbose: False   #???
+    penalty_epsilon: 0.05  #default: 0.1 (maybe this makes it slow??)
     #weight_max_vel_x: 2
-    weight_max_vel_x: 100
+    weight_max_vel_x: 100  #default: 2.0
     #weight_max_vel_theta: 1
     #Set to high value so we do not lose laser track
-    weight_max_vel_theta: 500
-    weight_acc_lim_x: 1
-    weight_acc_lim_theta: 1
-    weight_kinematics_nh: 1000
-    weight_kinematics_forward_drive: 1
-    weight_kinematics_turning_radius: 1
-    weight_optimaltime: 1
-    weight_obstacle: 50
+    weight_max_vel_theta: 500   #default: 1.0
+    weight_acc_lim_x: 1         #default: 1.0
+    weight_acc_lim_theta: 1         #default: 1.0
+    weight_kinematics_nh: 1000   #default: 1000
+    #weight_kinematics_forward_drive: 1
+    weight_kinematics_forward_drive: 1000 #Avoid V-shaped turns by punishing backward moves
+    #weight_kinematics_turning_radius: 1 #Only for car-like robos
+    weight_optimaltime: 1.0     #default: 1.0
+    weight_obstacle: 50       #default: 50
     weight_dynamic_obstacle: 10 # not in use yet
     alternative_time_cost: False # not in use yet
 
     # Homotopy Class Planner
 
-    enable_homotopy_class_planning: True
+    enable_homotopy_class_planning: False #Note: Turning this on will slow down planning so much that we get regular timeouts
     enable_multithreading: True
-    simple_exploration: False
+    simple_exploration: False  #???
     max_number_classes: 4
-    roadmap_graph_no_samples: 15
-    roadmap_graph_area_width: 5
+    roadmap_graph_no_samples: 15   #default: 15
+    roadmap_graph_area_width: 5    #default: 6
     h_signature_prescaler: 0.5
     h_signature_threshold: 0.1
     obstacle_keypoint_offset: 0.1

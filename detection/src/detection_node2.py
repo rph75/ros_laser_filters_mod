@@ -3,6 +3,7 @@
 from std_srvs.srv import Empty
 import numpy as np
 import cv2 #Must be imported before importing tensorflow, otherwise some strange error god knows why
+import tensorflow
 import rospy
 from camera_coord import CameraCoordinates
 import threading
@@ -18,7 +19,7 @@ path_to_checkpoint='/home/roman/models/bricks_model/saved_model'
 cam_width = 800
 cam_height = 600
 cam_fps = 15    #fps to be used in camera pipeline
-detect_fps = 5  # detect frames per second
+detect_fps = 10  # detect frames per second
 stream_fps = 3  # image frames per second (doing this less frequently saves bandwith in ros)
 img_resize = 0.2 #Resize image, to reduce network traffic (RViz can't see very well anyway...)
 
@@ -27,9 +28,6 @@ OVERLAP_THRESHOLD = 0.8 #If area overlaps more than this value, consider this a 
 
 debug_detect = True  # For debug: Do detection or camera only
 debug_show = False
-
-if debug_detect:
-    import tensorflow
 
 class Detection:
     def __init__(self,time, source, x_min_pix, y_min_pix, x_max_pix, y_max_pix, label, score, x_m, y_m, width_m, is_valid):
@@ -121,15 +119,6 @@ class Node:
                     color = self.extract_color(d,img_near,img_far)
                     det=singledetection(position=position, color=color, source=d.source,stamp=d.time)
                     detections.append(det)
-            self.detect_count += 1
-
-            duration = (current_time - self.detect_time).to_sec()
-            if duration > 3:
-                fps = self.detect_count / duration
-                rospy.loginfo(rospy.get_name() + " Detecting {} fps".format(fps))
-                self.detect_time = current_time
-                self.detect_count = 0
-
         #rospy.loginfo(rospy.get_name() + " publishing detection")
         detectionarr = detectionarray(detections=detections)
         detectionarr.header.frame_id="camera_link"
@@ -349,8 +338,6 @@ class Node:
         self.video_captures = []
         self.frames = [None,None]
         self.frame_times=[None,None]
-        self.detect_time=rospy.Time.now()
-        self.detect_count = 0
         flips=[2,2]
         self.start_cameras(flips)
         rospy.loginfo(rospy.get_name() + " Opened cameras")

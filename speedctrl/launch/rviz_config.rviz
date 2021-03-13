@@ -87,6 +87,8 @@ Visualization Manager:
         All Enabled: false
         base_link:
           Value: true
+        camera_link:
+          Value: true
         gripper:
           Value: true
         laser:
@@ -104,6 +106,8 @@ Visualization Manager:
         map:
           odom:
             base_link:
+              camera_link:
+                {}
               gripper:
                 {}
               laser:
@@ -282,15 +286,7 @@ Visualization Manager:
       Color: 25; 255; 255
       Enabled: true
       Name: Polygon
-      Topic: /camera_area_near
-      Unreliable: false
-      Value: true
-    - Alpha: 1
-      Class: rviz/Polygon
-      Color: 25; 255; 255
-      Enabled: true
-      Name: Polygon
-      Topic: /camera_area_near_small
+      Topic: /stable_area
       Unreliable: false
       Value: true
     - Class: rviz/Image
@@ -322,7 +318,9 @@ Visualization Manager:
       Marker Topic: /bricks
       Name: MarkerArray
       Namespaces:
-        {}
+        brick: true
+        cylinder: true
+        text: true
       Queue Size: 100
       Value: true
     - Alpha: 1
@@ -376,7 +374,7 @@ Visualization Manager:
           Scale: 1
           Value: true
         Value: true
-      Enabled: true
+      Enabled: false
       Head Length: 0.30000001192092896
       Head Radius: 0.10000000149011612
       Name: PoseWithCovariance
@@ -385,14 +383,14 @@ Visualization Manager:
       Shape: Arrow
       Topic: /amcl_pose
       Unreliable: false
-      Value: true
+      Value: false
     - Alpha: 0.10000000149011612
       Arrow Length: 0.30000001192092896
       Axes Length: 0.30000001192092896
       Axes Radius: 0.009999999776482582
       Class: rviz/PoseArray
       Color: 255; 25; 0
-      Enabled: true
+      Enabled: false
       Head Length: 0.07000000029802322
       Head Radius: 0.029999999329447746
       Name: PoseArray
@@ -401,7 +399,7 @@ Visualization Manager:
       Shape: Arrow (Flat)
       Topic: /particlecloud
       Unreliable: false
-      Value: true
+      Value: false
   Enabled: true
   Global Options:
     Background Color: 48; 48; 48
@@ -430,15 +428,15 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz/XYOrbit
-      Distance: 13.705841064453125
+      Distance: 15.860467910766602
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
         Swap Stereo Eyes: false
         Value: false
       Focal Point:
-        X: -2.108179807662964
-        Y: 1.983765721321106
+        X: 0.6871998310089111
+        Y: 0.08348983526229858
         Z: -6.198883056640625e-6
       Focal Shape Fixed Size: true
       Focal Shape Size: 0.05000000074505806
@@ -448,7 +446,7 @@ Visualization Manager:
       Pitch: 1.5697963237762451
       Target Frame: <Fixed Frame>
       Value: XYOrbit (rviz)
-      Yaw: 2.6035547256469727
+      Yaw: 2.6285512447357178
     Saved: ~
 Window Geometry:
   Camera:
@@ -470,5 +468,5 @@ Window Geometry:
   Views:
     collapsed: false
   Width: 2964
-  X: 768
-  Y: 184
+  X: 769
+  Y: 95

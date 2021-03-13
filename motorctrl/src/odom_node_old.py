@@ -7,43 +7,10 @@ from nav_msgs.msg import Odometry
 from geometry_msgs.msg import Point, Pose, Quaternion, Twist, Vector3
 from motorctrl.srv import motorctrl_readspeed, motorctrl_readspeedResponse, motorctrl_readpos, motorctrl_readposResponse, motorctrl_writepos, motorctrl_writeposResponse, motorctrl_writespeed, motorctrl_writespeedResponse
 from odometry_data import Converter, enc_per_m
-import threading
+
 
 class Node:
-    def callback_publish(self,timer_event):
-        #Publish the measured data
-        #This loop can be called more often than the update loop, potentially publishing the same data multiple times
-        #TODO: Could extrapolate last movement to get a more precise measurement
-        # publish the message
-        with self.lock:
-            if self.topub_x is not None:
-                current_time = rospy.Time.now()
-                # since all odometry is 6DOF we'll need a quaternion created from yaw
-                odom_quat = tf.transformations.quaternion_from_euler(0, 0, self.topub_th)
-
-                # publish the transform over tf
-                self.odom_broadcaster.sendTransform(
-                    (self.topub_x, self.topub_y, 0.),
-                    odom_quat,
-                    current_time,
-                    "base_link",
-                    "odom"
-                )
-                # next, we'll publish the odometry message over ROS
-                odom = Odometry()
-                odom.header.stamp = current_time
-                odom.header.frame_id = "odom"
-
-                # set the position
-                odom.pose.pose = Pose(Point(self.topub_x, self.topub_y, 0.), Quaternion(*odom_quat))
-
-                # set the velocity
-                odom.child_frame_id = "base_link"
-                odom.twist.twist = Twist(Vector3(self.topub_path, 0, 0), Vector3(0, 0, self.topub_ang))
-                # Publish the odometry message
-                self.odom_pub.publish(odom)
-
-    def callback_update(self,timer_event):
+    def callback(self,timer_event):
         current_time = rospy.Time.now()
         motorctrl_readpos_response=self.motorctrl_readpos_proxy()
         encoder=motorctrl_readpos_response.encoder
@@ -78,13 +45,33 @@ class Node:
             self.y += delta_y
             self.th += delta_th
 
-            with self.lock:
-                #Put on backlog to be published next
-                self.topub_x = self.x
-                self.topub_y = self.y
-                self.topub_th = self.th
-                self.topub_path = path
-                self.topub_ang = ang
+            # since all odometry is 6DOF we'll need a quaternion created from yaw
+            odom_quat = tf.transformations.quaternion_from_euler(0, 0, self.th)
+
+            # first, we'll publish the transform over tf
+            self.odom_broadcaster.sendTransform(
+                (self.x, self.y, 0.),
+                odom_quat,
+                current_time,
+                "base_link",
+                "odom"
+            )
+
+            # next, we'll publish the odometry message over ROS
+            odom = Odometry()
+            odom.header.stamp = current_time
+            odom.header.frame_id = "odom"
+
+            # set the position
+            odom.pose.pose = Pose(Point(self.x, self.y, 0.), Quaternion(*odom_quat))
+
+            # set the velocity
+            odom.child_frame_id = "base_link"
+            odom.twist.twist = Twist(Vector3(path, 0, 0), Vector3(0, 0, ang))
+
+            # publish the message
+            self.odom_pub.publish(odom)
+
 
         self.last_encoder = encoder
         self.last_time = current_time
@@ -101,7 +88,7 @@ class Node:
         rospy.wait_for_service('/motorctrl_service/readpos')
         rospy.wait_for_service('/motorctrl_service/readspeed')
         rospy.loginfo(rospy.get_name() + " Found service /motorctrl_service/* .")
-        self.lock = threading.Lock()
+
         self.motorctrl_readpos_proxy = rospy.ServiceProxy('/motorctrl_service/readpos', motorctrl_readpos)
         self.odom_pub = rospy.Publisher("odom", Odometry, queue_size=50)
         self.odom_broadcaster = tf.TransformBroadcaster()
@@ -111,10 +98,10 @@ class Node:
         self.y=0
         self.th=0
         self.last_encoder=None
-        self.topub_x=None
         self.converter = Converter()
-        rospy.Timer(rospy.Duration.from_sec(1.0/10), self.callback_update)   #Measurement rate
-        rospy.Timer(rospy.Duration.from_sec(1.0/100), self.callback_publish) #Publish rate
+        period_secs = 0.050
+        interval = rospy.Duration.from_sec(period_secs)
+        rospy.Timer(interval, self.callback)
         rospy.loginfo(rospy.get_name() + " started odom_node.")
         rospy.spin()
 

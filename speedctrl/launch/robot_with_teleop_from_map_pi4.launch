@@ -2,32 +2,31 @@
 
 <launch>
 
-  <machine name="robot" address="jetson" user="roman" password="Moj0Moj0" env-loader="/home/roman/catkin_ws/src/speedctrl/launch/jetson_env_loader.sh"/>
-  <machine name="robot_or_main" address="jetson" user="roman" password="Moj0Moj0" env-loader="/home/roman/catkin_ws/src/speedctrl/launch/jetson_env_loader.sh"/>
-  <!--<machine name="robot_or_main" address="desktop" user="roman"/>-->
-  <machine name="main" address="desktop" user="roman"/>
+  <machine name="jetson" address="jetson" user="roman" password="Moj0Moj0" env-loader="/home/roman/catkin_ws/src/speedctrl/launch/jetson_env_loader.sh"/>
+  <machine name="pi4" address="pi4" user="roman" password="Moj0Moj0" env-loader="/home/roman/catkin_ws/src/speedctrl/launch/jetson_env_loader.sh"/>
+  <machine name="desktop" address="desktop" user="roman"/>
 
     <!-- reroute the scanmatch_odom from hector to odom used by the planner -->
   <!--
   <remap from="/scanmatch_odom" to="/odom"/>
   -->
-  <node pkg="i2c" type="i2cService.py" name="i2c" output="screen" machine="robot">
+  <node pkg="i2c" type="i2cService.py" name="i2c" machine="jetson">
   </node>
 
-  <node pkg="motorctrl" type="odom_node.py" name="odom_node" output="screen" machine="robot_or_main">
+  <node pkg="motorctrl" type="odom_node.py" name="odom_node" machine="pi4">
   </node>
 
 <!--
-  <node pkg="detection" type="detection_node.py" name="detection" output="screen" machine="robot">
+  <node pkg="detection" type="detection_node.py" name="detection" machine="robot">
   </node>
-  <node pkg="detection" type="bricks_tracker_node.py" name="bricks_tracker" output="screen" machine="robot_or_main">
+  <node pkg="detection" type="bricks_tracker_node.py" name="bricks_tracker" machine="robot_or_main">
   </node>
 -->
 
-  <node pkg="detection" type="image_translation_node.py" name="image_translation" output="screen" machine="robot">
+  <node pkg="detection" type="image_translation_node.py" name="image_translation" machine="jetson">
   </node>
 
-  <node pkg="rplidar_ros" type="rplidarNode" name="rplidarNode" output="screen" machine="robot">
+  <node pkg="rplidar_ros" type="rplidarNode" name="rplidarNode" machine="pi4">
       <param name="serial_port"         type="string" value="/dev/ttyUSB0"/>
       <param name="serial_baudrate"     type="int"    value="115200"/>
       <param name="frame_id"            type="string" value="laser"/>
@@ -37,44 +36,44 @@
   </node>
 
 
-  <node pkg="laser_filters" type="scan_to_scan_filter_chain" name="laser_filter" machine="robot_or_main">
+  <node pkg="laser_filters" type="scan_to_scan_filter_chain" name="laser_filter" machine="pi4">
     <rosparam command="load" file="$(find speedctrl)/launch/laser_filter.yaml" />
     <remap from="/scan" to="/scan_raw"/>
     <remap from="/scan_filtered" to="/scan"/>
   </node>
 
-  <node pkg="battery" type="batteryNode.py" name="battery" output="screen" machine="robot_or_main">
+  <node pkg="battery" type="batteryNode.py" name="battery"  machine="jetson">
   </node>
 
-  <node pkg="motorctrl" type="motorCtrlService.py" name="motorctrl" output="screen" machine="robot_or_main">
+  <node pkg="motorctrl" type="motorCtrlService.py" name="motorctrl" machine="pi4">
   </node>
 
 
 
-  <node pkg="speedctrl" type="speedCtrlNode.py" name="speedctrl" output="screen" machine="robot_or_main">
+  <node pkg="speedctrl" type="speedCtrlNode.py" name="speedctrl"  machine="pi4">
   </node>
 
-  <node pkg="teleop_twist_keyboard" type="teleop_twist_keyboard.py" name="teleop_twist_keyboard" output="screen" machine="main">
+  <node pkg="teleop_twist_keyboard" type="teleop_twist_keyboard.py" name="teleop_twist_keyboard" machine="desktop">
     <param name="speed" value="0.15"/>
     <param name="turn" value="0.10"/>
   </node>
 
-  <node pkg="rviz" type="rviz" name="rviz" args="-d $(find speedctrl)/launch/rviz_config.rviz" machine="main"/>
+  <node pkg="rviz" type="rviz" name="rviz" args="-d $(find speedctrl)/launch/rviz_config.rviz" machine="desktop"/>
 
 
   <!--<param name="/use_sim_time" value="true"/>-->
   <param name="/use_sim_time" value="false"/>
 
 
-  <node pkg="map_server" type="map_server" name="map_server" args="/home/roman/catkin_ws/src/speedctrl/launch/apartment-modified.yaml">
+  <node pkg="map_server" type="map_server" name="map_server" args="/home/roman/catkin_ws/src/speedctrl/launch/apartment-modified.yaml" machine="pi4">
     <param name="frame_id" value="map"/>
   </node>
 
-  <node pkg="amcl" type="amcl" name="amcl">
+  <node pkg="amcl" type="amcl" name="amcl" machine="pi4">
     <param name="update_min_d" value="0.05"/>
     <param name="update_min_a" value="0.05"/>
     <param name="save_pose_rate" value="-1"/>
-
+    <param name="transform_tolerance" value="0.5"/> <!-- default here is 0.1s; this is too little as AMCL publishes only at 6.8 Hz, resulting in invalid transforms -->
     <param name="odom_model_type" value="diff-corrected"/>
     <!-- strange: documentation mentions that we need to use much smaller params for the alphas if diff-corrected is used
     however, it turns out that these small values are not good, as they put too much trust in the odometry, and larger
@@ -94,11 +93,11 @@
   </node>
 
   <!--<node pkg="tf" type="static_transform_publisher" name="map_nav_broadcaster" args="0 0 0 0 0 0 map nav 100"/>-->
-  <node pkg="tf" type="static_transform_publisher" name="base_to_laser_broadcaster" args="0.11 0.0675 0 0 0 1 0 base_link laser 100" machine="robot_or_main"/>
-  <node pkg="tf" type="static_transform_publisher" name="base_to_gripper_broadcaster" args="0.188 -0.029 0 0 0 0 1 base_link gripper 100" machine="robot_or_main"/>
-  <node pkg="tf" type="static_transform_publisher" name="base_to_camera_broadcaster" args="0.15 0.038 0 0 0 0 1 base_link camera_link 100" machine="robot_or_main"/>
+  <node pkg="tf" type="static_transform_publisher" name="base_to_laser_broadcaster" args="0.11 0.0675 0 0 0 1 0 base_link laser 10" machine="pi4"/>
+  <node pkg="tf" type="static_transform_publisher" name="base_to_gripper_broadcaster" args="0.188 -0.029 0 0 0 0 1 base_link gripper 10" machine="pi4"/>
+  <node pkg="tf" type="static_transform_publisher" name="base_to_camera_broadcaster" args="0.15 0.038 0 0 0 0 1 base_link camera_link 10" machine="pi4"/>
 
-  <node pkg="move_base" type="move_base" respawn="true" name="move_base" output="screen" machine="main">
+  <node pkg="move_base" type="move_base" respawn="true" name="move_base" machine="pi4">
 
     <rosparam file="$(find speedctrl)/launch/costmap_common_params.yaml" command="load" ns="global_costmap" />
     <rosparam file="$(find speedctrl)/launch/costmap_common_params.yaml" command="load" ns="local_costmap" />
@@ -107,4 +106,6 @@
     <rosparam file="$(find speedctrl)/launch/base_local_planner_params.yaml" command="load" />
 
   </node>
+
+
 </launch>
