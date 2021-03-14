@@ -4,6 +4,7 @@ import rospy, math, threading
 from geometry_msgs.msg import Twist
 from motorctrl.srv import motorctrl_readpos, motorctrl_readspeed, motorctrl_writepos, motorctrl_writespeed
 from motorctrl.msg import motorctrl_writeentry
+from speedctrl.msg import speedlimit
 
 #TODO: Move to params file
 
@@ -15,8 +16,8 @@ enc_per_m=11500.0 #encoder units per cm #TODO: centralize this value (shared wit
 # Note - it is currently not known how often move_base publishes the cmd_vel - but it seems rather infrequent when robot does in-place rotations - hence upping this to 30 seconds
 # Note - if this is too large, sometimes move_base is stuck and doesn't send any updated, and then the robot goes mad...
 INTERVAL_SECS = 2
-MAX_ANG_SPEED=0.26
-MAX_SPEED=0.15
+#MAX_ANG_SPEED=0.26
+#MAX_SPEED=0.15
 #ENC_PER_RAD=3000 #encoder units per rad turn. Good guess?
 #ACCELERATION=0.1 #in m per square second
 #NUM_ACCELERATION_STEPS=5 #Number of steps to compute acceleration (1= one single step, no smoothing)
@@ -187,10 +188,16 @@ class Node:
     #     writespeedentries=[writespeedentry]
     #     writespeed_response=writespeed_proxy(writespeedentries=writespeedentries)
 
-    def add_seconds(self,time,seconds):
-        add_secs=int(seconds)
-        add_nsecs=(seconds-add_secs)*1000000000
-        return rospy.Time(secs=time.secs+add_secs,nsecs=time.nsecs+add_nsecs)
+    #def add_seconds(self,time,seconds):
+    #    add_secs=int(seconds)
+    #    add_nsecs=(seconds-add_secs)*1000000000
+    #    return rospy.Time(secs=time.secs+add_secs,nsecs=time.nsecs+add_nsecs)
+
+    def callback_speedlimit(self,speedlimit):
+        if speedlimit.max_angular_speed is not None:
+            self.max_angular_speed=speedlimit.max_angular_speed
+        if speedlimit.max_translational_speed is not None:
+            self.max_translational_speed=speedlimit.max_translational_speed
 
     def callback(self,twist):
         with self.lock:
@@ -215,12 +222,15 @@ class Node:
             path_speed = twist.linear.x  # In m/s
             ang_speed = twist.angular.z  # In rad/s
             #
-            # Apply the limits for path speed / ang speed
-            path_speed = min(path_speed, MAX_SPEED)
-            path_speed = max(path_speed, -MAX_SPEED)
-            ang_speed = min(ang_speed, MAX_ANG_SPEED)
-            ang_speed = max(ang_speed, -MAX_ANG_SPEED)
+            # Scale down the movement to be within the limits (scale both by same)
+            scaling = 1.0
+            if self.max_translational_speed is not None and abs(path_speed) > self.max_translational_speed:
+                scaling=min(scaling,self.max_translational_speed/abs(path_speed))
+            if self.max_angular_speed is not None and  abs(ang_speed) > self.max_angular_speed:
+                scaling=min(scaling,self.max_angular_speed/abs(ang_speed))
 
+            path_speed = path_speed*scaling
+            ang_speed = ang_speed*scaling
             #
             # TODO: This is a very simple approximation to map angular speed and path speed to controller delta and speed
             # We trust the navigation layer to constantly optimze this if the speed commands do not match the reality
@@ -249,6 +259,8 @@ class Node:
 
     def __init__(self):
         self.last_twist = None
+        self.max_angular_speed = None
+        self.max_translational_speed = None
         rospy.init_node('speed_ctrl')
         rospy.loginfo(rospy.get_name() + " Waiting for service /motorctrl_service/* ...")
         rospy.wait_for_service('/motorctrl_service/readpos')
@@ -258,6 +270,7 @@ class Node:
         rospy.loginfo(rospy.get_name() + " Found service /motorctrl_service/* .")
         self.writespeed_proxy = rospy.ServiceProxy('motorctrl_service/writespeed', motorctrl_writespeed)
         self.lock = threading.Lock()
+        rospy.Subscriber("/speedctrl/speedlimit", speedlimit, self.callback_speedlimit)
         rospy.Subscriber("cmd_vel", Twist, self.callback)
         rospy.Timer(rospy.Duration.from_sec(0.05), self.callback_tim)
         rospy.loginfo(rospy.get_name() + " subscribed to cmd_vel.")

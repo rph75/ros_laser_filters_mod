@@ -1,5 +1,24 @@
 #!/usr/bin/env python
 
+# Still todo:
+# (DONE, TBC) 1. Updating the speed when getting closer to goal does not work - as it seems to reload stuff in move_base, and
+# then sometimes crashes. Instead, maybe send a message to speed_ctrl which limits the speed externally?
+# (DONE, TBC) 2. When goal is aborted, it stays there, always cleaning out map. This must be fixed (maybe it is enough to stop
+# triggering the abort logic once the bricks have been cleaned out
+# (DONE, TBC) 3. When we're close to the brick, sometimes it moves around in circles. This is because it constantly keeps updating
+# the goal, as we're within the 20 cm limit. This needs to be changed to keep the goal fixed. Rather than checking
+# the distance between the new target goal and the previous target goal, (which keeps changing because the attack
+# angle keeps updating, we could instead check the updated distance of the brick itself).
+# 4. When the timer loop here is set to something less than 0.5 secs, the move_base gets into some state 'LOST'
+# to fix this, maybe have to
+# - do not read out goal status too frequently (can test this)
+# - after setting the new goal, wait until the status has updated (as otherwise the wrong status may be read?)
+# but it is unclear why. Ideally we can reduce the loop time, which will help with approaching the brick better?
+# 5. When finding next way point avoid going backwards if the previous one was overshoot because
+# a brick was detected
+# (DONE, TBC) 6. In approaching: when computing time, better max by incorporating the angle as well as part of the speed
+# otherwise when movement is only sidewise and not forwards, it can go too fast.
+
 import numpy as np
 #import cv2 #Must be imported before importing tensorflow, otherwise some strange error god knows why
 import threading
@@ -19,6 +38,7 @@ from motorctrl.srv import  motorctrl_writepos, motorctrl_readpos, motorctrl_grip
 from motorctrl.msg import motorctrl_writeentry
 import actionlib
 from rospy import Duration
+from speedctrl.msg import speedlimit
 
 
 marker_scale=Vector3(0.032,0.032,0.02)
@@ -80,6 +100,13 @@ GRIPPER_GRIP_TIME= Duration.from_sec(1.5) # time to open/close gripper
 GOAL_STATUS_LOG_INTERVAL = Duration.from_sec(5.0)
 enc_per_m=11500.0 #encoder units per cm #TODO: centralize this value (shared with odom_data)
 
+MAX_DISTANCE_SLOWDOWN = 0.75  # Distance when robot will start slowing down as it is approaching the brick
+MIN_DISTANCE_SLOWDOWN = 0.2  # Distance when robot will have reached minimum speed
+MAX_SPEED = 0.21  # Max speed - keep this in line with navigation params
+MAX_ANG_SPEED = 0.18  # Max speed - keep this in line with navigation params
+MIN_SPEED = 0.03  # Min speed, to be used when we get really close to brick / approaching the brick. Must be > penalty_epsilon
+MIN_ANG_SPEED = 0.02  # Min angular speed, to be used when approaching
+
 #Tolerance of base_link to waypoint before the target waypoint is updated to the next one
 WAYPOINT_TOLERANCE = 0.5
 #Defines a path which the robot should follow if there is no brick around to collect
@@ -122,7 +149,8 @@ class Node:
         self.status = STATUS_IDLE
         self.brick_goal = None
         self.brick_id = 1
-        self.target_pose = None
+        self.target_pose = None  #Target pose for movement to get close to brick
+        self.target_brick_pos = None  #Target position of brick, which was used to compute the target_pos
         self.next_idle_waypoint = None
         self.pool = []
         self.move_base_action = actionlib.SimpleActionClient('move_base',MoveBaseAction)
@@ -132,11 +160,12 @@ class Node:
         self.readpos_proxy = rospy.ServiceProxy('motorctrl_service/readpos', motorctrl_readpos)
         self.gripper_proxy = rospy.ServiceProxy('motorctrl_service/grippercommand', motorctrl_grippercommand)
         rospy.Subscriber("detectionarray", detectionarray, self.callback,queue_size=2) #TODO: Cannot process fast enough, therefore dropping - is this good?
+        self.speedlimit_pub = rospy.Publisher("/speedctrl/speedlimit", speedlimit, queue_size=2)
         self.markers_pub = rospy.Publisher("bricks", MarkerArray, queue_size=10)
         self.stable_area_pub = rospy.Publisher("stable_area", PolygonStamped, queue_size=10)
         self.gripper_area_pub = rospy.Publisher("gripper_area", PolygonStamped, queue_size=10)
         self.idle_waypoints_pub = rospy.Publisher("idle_waypoints", PoseArray, queue_size=10)
-        interval = rospy.Duration.from_sec(0.5)
+        interval = rospy.Duration.from_sec(0.5) #If this is too small, we start having issues with set_goal - why?
         rospy.Timer(interval, self.callback_tim)
         self.move_base_action.cancel_goal() #Cancel any previous goal, such that when this node gets started we are clean
         rospy.loginfo(rospy.get_name() + " started bricks_tracker_node.")
@@ -158,7 +187,16 @@ class Node:
 
         # Now trace the stuff
         goal_status = self.move_base_action.get_state()
-        if (current_time > self.log_next_goal_status):
+        if goal_status == GoalStatus.ABORTED:
+            # Goal was aborted - infeasible to get there
+            # Clean out map (maybe some bad detections which do not really exist), and go back to idle
+            rospy.loginfo(rospy.get_name() + " move_base has aborted - cleaning out map and going back to idle state")
+            with self.lock:
+                self.pool = []
+                self.brick_goal = None
+                self.status = STATUS_IDLE
+
+        if current_time > self.log_next_goal_status:
             rospy.loginfo(rospy.get_name() + " move base goal status is {} ({}), state machine is in status {} ".format(goal_status,STATUS_STR[goal_status],self.status))
             self.log_next_goal_status=current_time+GOAL_STATUS_LOG_INTERVAL
 
@@ -195,6 +233,7 @@ class Node:
                 if closest_brick is not None:
                     rospy.loginfo(rospy.get_name() + " Found brick {} in gripper area - approach it ".format(closest_brick.id))
                     self.brick_goal = closest_brick
+                    self.target_brick_pos = closest_brick.position_map
                     self.move_base_action.cancel_goal() #Cancel any current goal - just in case
                     self.approaching_valid_pos_counter = 0
                     self.status = STATUS_APPROACHING
@@ -214,12 +253,15 @@ class Node:
                 rospy.loginfo(rospy.get_name() + " Closest brick is {}, sending goal".format(closest_brick.id))
                 #self.next_idle_waypoint = None # reset idle path
                 self.brick_goal = closest_brick
+                self.target_brick_pos = closest_brick.position_map
                 self.target_pose = self.compute_base_target_pos(closest_brick,pose_gripper_map,pose_gripper_base)
                 #rospy.loginfo(rospy.get_name() + " Going with base link to coordinates {}".format(target_pose_base_map))
                 self.status = STATUS_MOVINGBASE
                 #Send the action
                 rospy.loginfo(rospy.get_name() + " Sending goal to move base")
+                self.set_speed(MAX_SPEED)
                 self.move_base_action.send_goal(MoveBaseGoal(target_pose=PoseStamped(header=Header(frame_id="map", stamp=current_time), pose=self.target_pose)))
+                rospy.loginfo(rospy.get_name() + " state after sending goal "+str(self.move_base_action.get_state()))
                 return
             else:
                 # No bricks around - follow an idle path
@@ -230,7 +272,7 @@ class Node:
                             if updated_waypoint is None or self.calc_distance(pose_base_map.position,waypoint.position) < self.calc_distance(pose_base_map.position,updated_waypoint.position):
                                 updated_waypoint = waypoint
                         rospy.loginfo(rospy.get_name() + " found closest waypoint {}".format(updated_waypoint))
-                elif goal_status != 1:
+                elif goal_status != GoalStatus.ACTIVE:
                     updated_waypoint = self.next_idle_waypoint
                     #rospy.loginfo(rospy.get_name() + " goal status is not active; resuming path to waypoint {}".format(updated_waypoint))
                 elif self.calc_distance(pose_base_map.position,self.next_idle_waypoint.position) < WAYPOINT_TOLERANCE:
@@ -243,21 +285,32 @@ class Node:
                     #Send target to next waypoint
                     #rospy.loginfo(rospy.get_name() + " going to waypoint {}".format(updated_waypoint))
                     self.next_idle_waypoint = updated_waypoint
+                    self.set_speed(MAX_SPEED)
                     self.move_base_action.send_goal(MoveBaseGoal(target_pose=PoseStamped(header=Header(frame_id="map", stamp=current_time),pose=updated_waypoint)))
+                    rospy.loginfo(rospy.get_name() + " state after sending goal "+str(self.move_base_action.get_state()))
+
                 #
                 return
 
         if self.status==STATUS_MOVINGBASE:
             # Check if we're healthy and moving
             if goal_status == GoalStatus.PENDING or goal_status == GoalStatus.ACTIVE:
+                distance = self.calc_distance(pose_gripper_map.position,self.brick_goal.position_map)
+                if distance<MAX_DISTANCE_SLOWDOWN:
+                    speed = (MAX_SPEED - MIN_SPEED)/(MAX_DISTANCE_SLOWDOWN-MIN_DISTANCE_SLOWDOWN) *(distance-MIN_DISTANCE_SLOWDOWN) + MIN_SPEED
+                    speed = max(speed,MIN_SPEED)
+                    self.set_speed(speed)
                 #Still moving
                 # When getting close to target (brick_goal is in far camera, and close enough): Adjust the goal, as we're getting more precision
-                target_pose = self.compute_base_target_pos(self.brick_goal,pose_gripper_map,pose_gripper_base)
-                d = self.calc_distance(self.target_pose.position,target_pose.position);
-                if d > 0.1: #TODO: Could make this dynamic and reduce the tolerance the closer we get
+                d = self.calc_distance(self.target_brick_pos,self.brick_goal.position_map);
+                tolerance = distance*0.2 #If distance to target is 2m, tolerance is 40 cm. If distance is 50cm, tolerance is 10 cm
+                if d > tolerance:
                     rospy.loginfo(rospy.get_name() + " Readjusting goal because previous target is {} m off".format(d))
+                    target_pose = self.compute_base_target_pos(self.brick_goal, pose_gripper_map, pose_gripper_base)
                     self.target_pose = target_pose
+                    self.target_brick_pos = self.brick_goal.position_map
                     self.move_base_action.send_goal(MoveBaseGoal(target_pose=PoseStamped(header=Header(frame_id="map", stamp=current_time), pose=self.target_pose)))
+                    rospy.loginfo(rospy.get_name() + " state after sending goal "+str(self.move_base_action.get_state()))
                 return
             if goal_status != GoalStatus.SUCCEEDED:
                 # Finished, but with error
@@ -293,15 +346,18 @@ class Node:
                     self.wait_until = current_time + GRIPPER_MOVE_TIME
                     self.status = STATUS_GRIPPER_LOWERING
                 else:
-                    self.wait_until = current_time + Duration(0.2) #Wait a bit for next frame
+                    self.wait_until = current_time + Duration(0.5) #Wait a bit for next frame
             else:
                 # Gripper is not close enough - adjust
                 rospy.loginfo(rospy.get_name() + " Adjusting gripper position")
                 self.approaching_valid_pos_counter=0
                 brick_cam = PointStamped(header=Header(stamp=current_time, frame_id="camera_link"), point=self.brick_goal.position_cam)
                 brick_gripper = self.listener.transformPoint("gripper",brick_cam)
-                rospy.loginfo(rospy.get_name() + " base coordinates: brick: {}, gripper: {}".format(brick_base.point,pose_gripper_base.position))
+                #rospy.loginfo(rospy.get_name() + " base coordinates: brick: {}, gripper: {}".format(brick_base.point,pose_gripper_base.position))
                 forward_m = brick_base.point.x - pose_gripper_base.position.x #we simply take the difference in x, don't care for rotation (as rotation is small anyway)
+                if forward_m > 0.05:
+                    # To avoid shooting over the target: reduce the forward in case we're not approaching really closely
+                    forward_m = forward_m * 0.8
                 alpha_rad = math.atan2(brick_base.point.y, brick_base.point.x) - math.atan2(pose_gripper_base.position.y,pose_gripper_base.position.x)  # in rad
                 delta_m= alpha_rad / 3.657 #Approximation. TODO: Clean up / merge with speed control one
                 rospy.loginfo(rospy.get_name() + " Need to go forward {} m, with a delta of {} m".format(forward_m,delta_m))
@@ -314,11 +370,14 @@ class Node:
                     readpos_reply.encoder[2] + forward_enc + delta_enc,
                     readpos_reply.encoder[3] + forward_enc + delta_enc
                 ]
-                time = Duration(3)  #TODO: Don't use constant, compute based on distance, plus a bit extra
+                #Set the time to such that speed is MIN_SPEED, MIN_ANG_SPEED
+                time = Duration(max(forward_m/MIN_SPEED,alpha_rad/MIN_ANG_SPEED,0.5))
+                #Use the time as an offset on the received time (microcontroller may be slightly offset)
                 writeposentry = motorctrl_writeentry(time=readpos_reply.time + time, target=positions_enc)
                 writeposentries = [writeposentry]
                 self.writepos_proxy(writeposentries=writeposentries)
-                self.wait_until = current_time + time
+                # add some time to get mecanicaally stable once movement has finished
+                self.wait_until = current_time + time + Duration(0.3)
             return
 
         if self.status == STATUS_GRIPPER_LOWERING:
@@ -347,6 +406,10 @@ class Node:
             self.brick_goal = None
             self.status = STATUS_IDLE
             return
+
+    def set_speed(self,speed):
+        rospy.loginfo(rospy.get_name() + " Setting max speed to {}".format(speed))
+        self.speedlimit_pub.publish(speedlimit(max_translational_speed=speed,max_angular_speed=MAX_ANG_SPEED))
 
     def calc_distance(self,p1,p2):
         return math.sqrt((p1.x-p2.x) ** 2 + (p1.y-p2.y) ** 2)
