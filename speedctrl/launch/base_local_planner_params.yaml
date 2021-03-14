@@ -1,5 +1,12 @@
-controller_frequency: 5.0  #default: 20 (control loop is to plan path on short horizon) - setting this to high values, e.g. 10, results in the robot to drift off the path, but would like to know why
-planner_frequency: 5.0  #default: 0 (0 means the global plan is computed only when a goal is set)
+#Controller frequency defines how often the path is recomputed (local plan),
+#and speed controls are output
+#The observation is that a value >=5 results in the robot going off track and not following the plan any longer
+#it is not quite clear why this happens - maybe when the speed controls are sent in quick succession,
+#they pile up and the speed control node does not update quickly enough?
+#For now, it appears that a value of 2 does the job, as the robot moves slowly anyway
+controller_frequency: 2.0  #default: 20 (control loop is to plan path on short horizon) - setting this to high values, e.g. 10, results in the robot to drift off the path, but would like to know why
+#Setting this to recompute the global plan once per second
+planner_frequency: 1.0  #default: 0 (0 means the global plan is computed only when a goal is set)
 recovery_behavior_enabled: false
 clearing_rotation_allowed: false
 base_local_planner: teb_local_planner/TebLocalPlannerROS

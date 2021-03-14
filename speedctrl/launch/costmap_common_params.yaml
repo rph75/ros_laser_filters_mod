@@ -10,4 +10,7 @@ observation_sources: laser_scan_sensor
 
 laser_scan_sensor: {sensor_frame: laser, data_type: LaserScan, topic: /scan, marking: true, clearing: true}
 
-update_frequency: 4.0
+#Updating the costmap too often makes no sense if the laser is slow
+#also, sometimes it was observed that the update take around 300ms, resulting in warnings printed
+#It is probably good enough to update twice a second, which results in detecting new obstacles every 500ms
+update_frequency: 2.0 #Default is 5 - but updating the costmap once every 500ms is enough?

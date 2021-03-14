@@ -123,7 +123,7 @@ def writespeed(request):
 
 def grippercommand(request):
     if request.action == 'MOVE':
-        gripper_to_position(request.position,request.duration)
+        gripper_to_position(request.position, request.duration)
     elif request.action =='OPEN':
         open_gripper(request.duration)
     elif request.action == 'CLOSE':

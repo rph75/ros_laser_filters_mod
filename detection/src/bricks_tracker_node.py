@@ -96,9 +96,10 @@ IDLE_WAYPOINTS = [
 
 
 class Brick:
-    def __init__(self, position, color, radius, count, source, id):
+    def __init__(self, position_cam, position_map, color, radius, count, source, id):
         self.id=id
-        self.position=position
+        self.position_cam=position_cam
+        self.position_map=position_map
         self.color=color
         self.radius=radius
         self.count=count
@@ -185,8 +186,8 @@ class Node:
                 #If there are >1 in the gripper area, find the one which is closest to the gripper (or closest to the base?)
                 closest_brick = None
                 for b in self.pool:
-                    if self.ray_tracing(b.position, gripper_poly_map):
-                        d = self.calc_distance(b,pose_gripper_map);
+                    if self.ray_tracing(b.position_map, gripper_poly_map):
+                        d = self.calc_distance(b.position_map,pose_gripper_map.position);
                         if closest_brick is None or d < distance:
                             distance = d
                             closest_brick = b
@@ -204,7 +205,7 @@ class Node:
                 #Find the closest brick (if any) - and move towards it
                 closest_brick = None
                 for b in self.pool:
-                    d = self.calc_distance(b, pose_gripper_map);
+                    d = self.calc_distance(b.position_map, pose_gripper_map.position);
                     if closest_brick is None or d < distance:
                         distance = d
                         closest_brick = b
@@ -226,13 +227,13 @@ class Node:
                 if self.next_idle_waypoint is None:
                         #Find the closest waypoint from current position (this is for the very first time)
                         for waypoint in IDLE_WAYPOINTS:
-                            if updated_waypoint is None or self.calc_distance(pose_base_map,waypoint) < self.calc_distance(pose_base_map,updated_waypoint):
+                            if updated_waypoint is None or self.calc_distance(pose_base_map.position,waypoint.position) < self.calc_distance(pose_base_map.position,updated_waypoint.position):
                                 updated_waypoint = waypoint
                         rospy.loginfo(rospy.get_name() + " found closest waypoint {}".format(updated_waypoint))
                 elif goal_status != 1:
                     updated_waypoint = self.next_idle_waypoint
                     #rospy.loginfo(rospy.get_name() + " goal status is not active; resuming path to waypoint {}".format(updated_waypoint))
-                elif self.calc_distance(pose_base_map,self.next_idle_waypoint) < WAYPOINT_TOLERANCE:
+                elif self.calc_distance(pose_base_map.position,self.next_idle_waypoint.position) < WAYPOINT_TOLERANCE:
                     # We are quite close to the waypoint - update goal to next waypoint before the robot will start tricks to reach goal exactly
                     i = (IDLE_WAYPOINTS.index(self.next_idle_waypoint)+1) % len(IDLE_WAYPOINTS)
                     updated_waypoint = IDLE_WAYPOINTS[i]
@@ -252,7 +253,7 @@ class Node:
                 #Still moving
                 # When getting close to target (brick_goal is in far camera, and close enough): Adjust the goal, as we're getting more precision
                 target_pose = self.compute_base_target_pos(self.brick_goal,pose_gripper_map,pose_gripper_base)
-                d = self.calc_distance(self.target_pose,target_pose);
+                d = self.calc_distance(self.target_pose.position,target_pose.position);
                 if d > 0.1: #TODO: Could make this dynamic and reduce the tolerance the closer we get
                     rospy.loginfo(rospy.get_name() + " Readjusting goal because previous target is {} m off".format(d))
                     self.target_pose = target_pose
@@ -270,16 +271,17 @@ class Node:
 
         if self.status == STATUS_APPROACHING:
             # Try placing the brick directly under the gripper, then wait a bit for getting a few stable shots
-            if not self.ray_tracing(self.brick_goal.position,gripper_poly_map):
+            if not self.ray_tracing(self.brick_goal.position_map,gripper_poly_map):
                 # The brick has left the gripper area - give up
                 rospy.loginfo(rospy.get_name() + " Brick no longer in gripper area - giving up.")
                 self.brick_goal = None
                 self.status = STATUS_IDLE
                 return
             # compute the required position adjustment, and send to motor controller
-            #TODO: Simplify - can go directly from camera to gripper frame
-            brick_map = PointStamped(header=Header(stamp=current_time, frame_id="map"), point=self.brick_goal.position)
-            brick_base = self.listener.transformPoint("base_link",brick_map)
+            # Note that for this adjustment, we use the camera position on the brick directly (rather than going
+            # through map frame) to avoid jitters in loop via the map transform
+            brick_cam = PointStamped(header=Header(stamp=current_time, frame_id="camera_link"), point=self.brick_goal.position_cam)
+            brick_base = self.listener.transformPoint("base_link",brick_cam)
             if math.sqrt((brick_base.point.x - pose_gripper_base.position.x) ** 2 + (brick_base.point.y - pose_gripper_base.position.y) ** 2)  < GRIPPER_TOLERANCE:
                 self.approaching_valid_pos_counter += 1
                 rospy.loginfo(rospy.get_name() + " Identified {} frames at correct position ".format(self.approaching_valid_pos_counter))
@@ -296,8 +298,9 @@ class Node:
                 # Gripper is not close enough - adjust
                 rospy.loginfo(rospy.get_name() + " Adjusting gripper position")
                 self.approaching_valid_pos_counter=0
-                #rospy.loginfo(rospy.get_name() + " base coordinates: brick: {}, gripper: {}".format(brick_base.point,pose_gripper_base.position))
-                #rospy.loginfo(rospy.get_name() + " map coordinates: brick: {}, gripper: {}".format(brick_map.point,pose_gripper_map.position))
+                brick_cam = PointStamped(header=Header(stamp=current_time, frame_id="camera_link"), point=self.brick_goal.position_cam)
+                brick_gripper = self.listener.transformPoint("gripper",brick_cam)
+                rospy.loginfo(rospy.get_name() + " base coordinates: brick: {}, gripper: {}".format(brick_base.point,pose_gripper_base.position))
                 forward_m = brick_base.point.x - pose_gripper_base.position.x #we simply take the difference in x, don't care for rotation (as rotation is small anyway)
                 alpha_rad = math.atan2(brick_base.point.y, brick_base.point.x) - math.atan2(pose_gripper_base.position.y,pose_gripper_base.position.x)  # in rad
                 delta_m= alpha_rad / 3.657 #Approximation. TODO: Clean up / merge with speed control one
@@ -346,14 +349,14 @@ class Node:
             return
 
     def calc_distance(self,p1,p2):
-        return math.sqrt((p1.position.x-p2.position.x) ** 2 + (p1.position.y-p2.position.y) ** 2)
+        return math.sqrt((p1.x-p2.x) ** 2 + (p1.y-p2.y) ** 2)
 
     #Computes the base target pos required to approach a given brick
     def compute_base_target_pos(self,brick,pose_gripper_map,pose_gripper_base):
         # FUse current robot's orientation to attempt
         rospy.loginfo(rospy.get_name() + " gripper angle is {}".format(self.quaternion_to_angle(pose_gripper_map.orientation)))
-        beta = 180.0 / math.pi * math.atan2(brick.position.y - pose_gripper_map.position.y,
-                                            brick.position.x - pose_gripper_map.position.x)
+        beta = 180.0 / math.pi * math.atan2(brick.position_map.y - pose_gripper_map.position.y,
+                                            brick.position_map.x - pose_gripper_map.position.x)
         if beta < 0:
             beta = beta + 360
         orientation = self.angle_to_quaternion(beta)
@@ -366,8 +369,8 @@ class Node:
         # compute gripper coordinates in map frame:
         g = pose_gripper_base.position.x + GRIPPER_DIST  # (x distance from base link to target position, i.e. sum of target distance from gripper plus distance base frame from gripper frame)
         # xg / yg are coordinates in map frame of the point which is on same x as base link, but at a different y (in base link frame)
-        xg = brick.position.x - math.cos(alpha_rad) * g
-        yg = brick.position.y - math.sin(alpha_rad) * g
+        xg = brick.position_map.x - math.cos(alpha_rad) * g
+        yg = brick.position_map.y - math.sin(alpha_rad) * g
         # compute base coordinates in map frame
         f = pose_gripper_base.position.y  # (y coordinate of gripper in base frame (negative value, as gripper is right of base link))
         # beta_rad=math.pi/2-alpha_rad
@@ -401,7 +404,7 @@ class Node:
             self.listener.waitForTransform("map", detectionarray.header.frame_id, singledetection.stamp, rospy.Duration.from_sec(10.0))
             p_map = self.listener.transformPoint("map", PointStamped(header=Header(frame_id=detectionarray.header.frame_id,stamp=singledetection.stamp),point=p_cam))
             radius=self.calc_radius(p_cam)
-            new_bricks.append(Brick(position=p_map.point, color=self.convert_brick_color(singledetection.color), radius=radius, count=RESET_COUNT, source=singledetection.source, id=-1))
+            new_bricks.append(Brick(position_cam=p_cam,position_map=p_map.point, color=self.convert_brick_color(singledetection.color), radius=radius, count=RESET_COUNT, source=singledetection.source, id=-1))
 
         # Remove double detections in near and far camera
         i=len(new_bricks) - 1
@@ -410,7 +413,7 @@ class Node:
                 #FAR detection found: if there is any NEAR detection within tolerance from this detection, remove FAR
                 #This is to avoid placing duplicates in case the same brick appears in near and far detection
                 for j in range(0,len(new_bricks)):
-                    if detectionarray.detections[j].source=="NEAR" and self.calc_distance(new_bricks[i],new_bricks[j])<0.05:
+                    if detectionarray.detections[j].source=="NEAR" and self.calc_distance(new_bricks[i].position_map,new_bricks[j].position_map)<0.05:
                         del(new_bricks[i])
                         break
             i-=1
@@ -423,7 +426,7 @@ class Node:
             i = len(self.pool) - 1
             while i >= 0:
                 brick = self.pool[i]
-                if self.ray_tracing(brick.position, stable_poly_map):
+                if self.ray_tracing(brick.position_map, stable_poly_map):
                     # Brick is in stable detection area - decrement the counter and remove if reaches zero
                     brick.dec_count()
                     if brick.count <= 0:
@@ -439,7 +442,7 @@ class Node:
                 i = len(new_bricks) - 1
                 while i >= 0:
                     n = new_bricks[i]
-                    distance = self.calc_distance(n,b)
+                    distance = self.calc_distance(n.position_map,b.position_map)
                     #rospy.loginfo(rospy.get_name() + " Distance between new and {} is {}, sum of radius is {}".format(b.id,distance,n.radius+b.radius))
                     if distance < n.radius+b.radius:
                         #rospy.loginfo(rospy.get_name() + " new and {} overlap, removing new".format(b.id))
@@ -447,10 +450,11 @@ class Node:
                         #1. Reset counter in existing, and update it's position etc
                         #2. remove the new one (as it was actually not a new one)
                         b.count=RESET_COUNT
+                        b.position_cam = n.position_cam #Always update camera position (as robot moves...)
                         if n.radius < b.radius:
                             #Update the position and the radius if the new detection is better (i.e. taken from closer)
                             b.radius=n.radius
-                            b.position=n.position
+                            b.position_map=n.position_map
                         del new_bricks[i]
                         break
                     i = i - 1
@@ -472,7 +476,7 @@ class Node:
             for i in range(0,len(self.pool)):
                 brick=self.pool[i]
                 # Create the cube
-                pose=Pose(position=Point(x=brick.position.x, y=brick.position.y, z=brick.position.z + marker_scale.z / 2), orientation=forward)
+                pose=Pose(position=Point(x=brick.position_map.x, y=brick.position_map.y, z=brick.position_map.z + marker_scale.z / 2), orientation=forward)
                 m=Marker(header=header,ns="brick",id=brick.id,type=Marker.CUBE,action=Marker.ADD,pose=pose,scale=marker_scale,color=brick.color)
                 markers.markers.append(m)
                 # Create the cylinder
@@ -481,7 +485,7 @@ class Node:
                 markers.markers.append(cyl_m)
 
                 # Create the label
-                text_point=Point(x=brick.position.x, y=brick.position.y, z=brick.position.z + 0.1)
+                text_point=Point(x=brick.position_map.x, y=brick.position_map.y, z=brick.position_map.z + 0.1)
                 test_pose=Pose(position=text_point,orientation=forward)
                 text_m=Marker(header=header,ns="text",id=brick.id,type=Marker.TEXT_VIEW_FACING,action=Marker.ADD,pose=test_pose,scale=text_scale,color=text_color,text=str(brick.id))
                 markers.markers.append(text_m)

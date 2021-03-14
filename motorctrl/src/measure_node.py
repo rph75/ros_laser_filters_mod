@@ -145,7 +145,7 @@ def callback_tim(timer_event):
             time_delta=last_pose.header.stamp-first_pose.header.stamp
             angle_first=quaternion_to_angle(first_pose.pose.orientation)
             angle_last=quaternion_to_angle(last_pose.pose.orientation)
-            line = str(patterns[pattern_idx-1][0])+","+str(patterns[pattern_idx-1][1])+","+str(time_delta)+","+str(first_pose.pose.position.x)+","+str(first_pose.pose.position.y)+","+str(angle_first)+","+str(last_pose.pose.position.x)+","+str(last_pose.pose.position.y)+","+str(angle_last)+"\n"
+            line = str(patterns[pattern_idx-1][0]) +"," + str(patterns[pattern_idx-1][1]) +"," + str(time_delta) +"," + str(first_pose.pose.position_map.x) + "," + str(first_pose.pose.position_map.y) + "," + str(angle_first) + "," + str(last_pose.pose.position_map.x) + "," + str(last_pose.pose.position_map.y) + "," + str(angle_last) + "\n"
             print(line)
             file.write(line)
             print("first_pose "+str(first_pose))
