@@ -41,8 +41,8 @@ TebLocalPlannerROS:
 
     # GoalTolerance
 
-    xy_goal_tolerance: 0.1
-    yaw_goal_tolerance: 0.3
+    xy_goal_tolerance: 0.07
+    yaw_goal_tolerance: 0.2
     #Too much precision in the goal tolerance may result in dumb oscillation when the target was reached
     #xy_goal_tolerance: 0.02
     #yaw_goal_tolerance: 0.09 #5 degrees
