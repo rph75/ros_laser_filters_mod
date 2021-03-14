@@ -55,7 +55,7 @@ SHUNT_RESISTOR_VALUES = [
 # The battery supply channel
 BATTERY_CHANNEL=2
 # The 5V channel powering the Jetson (Brain) only
-BRAIN_CHANNEL=0
+PI4_CHANNEL=0
 
 ORANGE_BGR = (0, 138, 230)
 WHITE_BGR = (255, 255, 255)
@@ -72,12 +72,17 @@ class Node:
         batt_V = self.getBusVoltage_V(BATTERY_CHANNEL)
         batt_A = self.getCurrent_A(BATTERY_CHANNEL)
         total_W = batt_V * batt_A
-        brain_V = self.getBusVoltage_V(BRAIN_CHANNEL)
-        brain_A = self.getCurrent_A(BRAIN_CHANNEL)
-        brain_W = brain_V * brain_A
+        pi4_V = self.getBusVoltage_V(PI4_CHANNEL)
+        pi4_A = self.getCurrent_A(PI4_CHANNEL)
+        pi4_W = pi4_V * pi4_A
         #
-        brainshunt_V = self.getShuntVoltage_V(BRAIN_CHANNEL)
-        rospy.loginfo(rospy.get_name() + " Brain bus: {:.2f} V, Brain: {:.2f} V / {:.2f} A".format(brain_V,brain_V - brainshunt_V,brain_A))
+        pi4shunt_V = self.getShuntVoltage_V(PI4_CHANNEL)
+        #
+        power_file = open("/sys/bus/i2c/drivers/ina3221x/6-0040/iio_device/in_power0_input", "r")
+        jetson_W = int(power_file.readline().rstrip())/1000
+        power_file.close()
+        rospy.loginfo(rospy.get_name() + " PI4 bus: {:.2f} V, PI4: {:.2f} V / {:.2f} A, Jetson {:.2f} W".format(pi4_V,pi4_V - pi4shunt_V,pi4_A,jetson_W))
+
         #
         # Publish battery message
         batteryState = BatteryState()
@@ -106,11 +111,12 @@ class Node:
             text_color = RED_BGR
             if self.blink_flag:
                 img_color = ORANGE_BGR
-        img = 0xff * np.ones(shape=[200, 400, 3], dtype=np.uint8)
+        img = 0xff * np.ones(shape=[270, 400, 3], dtype=np.uint8)
         img[:] = img_color
         cv2.putText(img, "Batt: {:.1f} V".format(batt_V), (25, 50), cv2.FONT_HERSHEY_SIMPLEX, 1.5, text_color, 3)
-        cv2.putText(img, "Brain: {:.1f} W".format(brain_W), (25, 120), cv2.FONT_HERSHEY_SIMPLEX, 1.5, BLACK_BGR, 2)
-        cv2.putText(img, "Total: {:.1f} W".format(total_W), (25, 170), cv2.FONT_HERSHEY_SIMPLEX, 1.5, BLACK_BGR, 2)
+        cv2.putText(img, "PI4: {:.1f} W".format(pi4_W), (25, 120), cv2.FONT_HERSHEY_SIMPLEX, 1.5, BLACK_BGR, 2)
+        cv2.putText(img, "Jetson: {:.1f} W".format(jetson_W), (25, 170), cv2.FONT_HERSHEY_SIMPLEX, 1.5, BLACK_BGR, 2)
+        cv2.putText(img, "Total: {:.1f} W".format(total_W), (25, 220), cv2.FONT_HERSHEY_SIMPLEX, 1.5, BLACK_BGR, 2)
         self.image_pub.publish(self.bridge.cv2_to_imgmsg(img))
         return
 
