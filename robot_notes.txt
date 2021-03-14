@@ -1,0 +1,700 @@
+Jetson setup, started 17.9.2020 on new SD card:
+
+ - Format SD card: 
+	Note if the card does not show as it has another image on it, use windows 'Disk Management' to delete the partition and recreate, then use the formatter
+	Once an SD card was flashed, Windows can't read it anymore. To reformat / reinstall, right click on This PC -> manage -> disk management, and recreate there
+
+ - Etched this on SD card:
+
+	Jetson Nano Developer Kit SD Card Image  JP 4.42020/07/07
+	This SD card image works for all Jetson Nano Developer Kits (both 945-13450-0000-100 and the older 945-13450-0000-000) and is built with JetPack 4.4. Download and write it to your microSD card and use it to boot the developer kit.
+	md5sum: 5da27fe0e5f5b4d6d91dbdc1833a4ae4
+
+- To make UPC wifi visible had to switch it from 5GHz to 2.4GHz
+
+- Once an SD card was flashed, Windows can't read it anymore. To reformat / reinstall, right click on This PC -> manage -> disk management, and recreate there
+
+- Use Wired LAN for first install to not lose WIFI
+
+
+- DO NOT UPDATE OpenCV! The preinstalled version is built with gstreamer support, but the one coming from pip is not!
+	- Make sure openCV is built with GStreamer support: 
+	python3
+	>>> import cv2
+	>>> print(cv2.getBuildInformation())
+	Will show GSTREAMER = YES (or NO if not)
+	
+- Install remote desktop (XFCE4 desktop + XRDP server for remote logon):
+	https://linuxize.com/post/how-to-install-xrdp-on-ubuntu-18-04/
+	(Firewall step can be skipped)
+
+	-----
+	sudo apt update
+	sudo apt install xfce4 xfce4-goodies xorg dbus-x11 x11-xserver-utils
+	sudo apt install xrdp 
+	sudo adduser xrdp ssl-cert 
+	sudo chown root:users /etc/xrdp/key.pem
+	create a .xsession file in /home/roman with one line content: xfce4-session
+	-----
+	
+	Make IP address 192.168.0.10 static in the router
+	
+	Make sure automatic login is disabled (user cannot be logged on both from remote and local)
+		
+	On windows, simply use Remote desktop program, with Xorg
+	
+	Notes:
+		- User must be logged out when logging in remotely - otherwise it will show Nvidia logo and then close again
+		- When loggin in locally, log on screen may still not be XFCE - use the small wheel to switch to XFCE during the logon
+		
+	Troubleshooting:
+		- sudo journalctl -S -3m
+		- https://github.com/neutrinolabs/xrdp/issues/1294	
+		
+		Basically, two fixes were required:
+		1. sudo chown root:users /etc/xrdp/key.pem
+		2. create a .xsession file in /home/roman with one line content: xfce4-session
+			
+
+- Remove some annyoing passowrd checks, such as asking for password to connect to WIFI when logging in remotely
+	In  /usr/share/polkit-1/actions/org.freedesktop.NetworkManager.policy
+	at the bottom of: <message>System policy prevents control of network connections</message>
+	put all to yes:
+				<allow_any>yes</allow_any> 
+				<allow_inactive>yes</allow_inactive> 
+				<allow_active>yes</allow_active> 	
+	
+- Test camera works:
+	Note, this must be done locally, not from remote, because of some display driver thingies:
+	
+	gst-launch-1.0 nvarguscamerasrc ! 'video/x-raw(memory:NVMM),width=3820, height=2464, framerate=21/1, format=NV12' ! nvvidconv flip-method=0 ! 'video/x-raw,width=960, height=616' ! nvvidconv ! nvegltransform ! nveglglessink -e
+
+	
+- Stream video from cam to VLC player:
+	Jetson: gst-launch-1.0 nvarguscamerasrc ! 'video/x-raw(memory:NVMM), format=(string)NV12, width=(int)640, height=(int)480, framerate=30/1' ! nvvidconv flip-method=2 ! nvjpegenc ! tcpserversink host=0.0.0.0 port=5000
+	PC: VLC: 
+		-open network stream: 
+		-tcp://192.168.0.10:5000
+		-set caching to 10ms
+	
+ - Install PyCharm IDE:
+ 
+	1. sudo apt-get update
+	
+	2. sudo apt-get install openjdk-8-jdk
+		This is required by Pycharm
+	
+	3. https://medium.com/@singh.shreya8/how-to-install-pycharm-in-ubuntu-16-04-ubuntu-14-04-ubuntu-18-04-linux-easiest-way-5ae19d052693
+		Download community edition from here: https://www.jetbrains.com/pycharm/download/#section=linux
+		cd Downloads
+		tar -xzf pycharm-community-2020.2.2.tar.gz
+		cd pycharm-community-2020.2.2/bin
+		sh pycharm.sh
+	
+- In Pycharm, when creating project, instead of picking 'new environment', choose 'existing interpreter', and set it to '/usr/bin/python3'
+	Or, if project is already created, change the python interpreter such that it can find the pre-installed openCV:
+	- settings->python interpreter -> wheel -> add -> existing environment -> choose /usr/bin/python3 
+	
+- Check camera with openCV from python: https://github.com/JetsonHacksNano/CSI-Camera/blob/master/simple_camera.py
+	- Note: This also works remotely
+
+	
+- Create a swap file:
+	sudo fallocate -l 8G /mnt/8GB.swap
+	sudo mkswap /mnt/8GB.swap
+	sudo swapon /mnt/8GB.swap
+	
+	Once the above is working, add the following line into /etc/fstab and reboot the system:
+	sudo vi /etc/fstab
+	/mnt/8GB.swap  none  swap  sw 0  0
+	
+	Check swap is indeed used:
+	cat /proc/swaps
+	
+	Note: it is also possible to set the swapiness value
+	
+- Setup samba drive:
+	1. sudo apt-get install samba samba-common-bin
+	2. configure the software by opening the file:
+		sudo vi /etc/samba/smb.conf 
+	3. Read through the file and make sure you have the following parameters set:
+		workgroup = WORKGROUP
+		wins support = yes
+	4. Define which folders to share in /etc/samba/smb.conf 
+	Scroll to the bottom and add the following:
+[Jetson]
+comment=Jetson Share
+path=/home/roman
+browseable=Yes
+writeable=Yes
+only guest=no
+create mask=0777
+directory mask=0777
+public=yes
+	
+	5. To let Samba know that “roman” is a network user run the command:
+		sudo smbpasswd -a roman
+		
+		empty password seems to do the job here
+		
+	6. chmod 777 /home/roman		
+		
+
+- Install python modules
+	sudo apt-get install -y python3-smbus
+	sudo apt-get install python3-tk
+
+		
+- Install pip3
+	sudo apt upddate
+	sudo apt install python3-pip
+	sudo pip3 install --upgrade pip setuptools wheel
+
+- Fix issue with protobuf / Build protobuf 3.8.0:
+		Originally, image comes with protobuf 3.0.0 - must be upgraded
+		
+		sudo pip3 uninstall protobuf
+
+		Install protobuf 3.8.0 as described in this link: https://jkjung-avt.github.io/jetpack-4.4/ AND https://github.com/jkjung-avt/jetson_nano/blob/master/install_protobuf-3.8.0.sh
+
+		Python protobuf implementation is extremely slow (about 800 secs to load the model).
+		However, using the c++ implementation (setting env variable  export PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION=cpp) fails because of version issues with the c++ protobuf implementation
+				
+
+
+
+- Install tensorflow
+	https://docs.nvidia.com/deeplearning/frameworks/install-tf-jetson-platform/index.html:
+	
+	Before installing, make sure protobuf has been manually built (as otherwise tensorflow will download its own protobuf implementation)
+	
+	Install binaries:
+		sudo apt-get update
+		sudo apt-get install libhdf5-serial-dev hdf5-tools libhdf5-dev zlib1g-dev zip libjpeg8-dev liblapack-dev libblas-dev gfortran
+	
+	Install pip3:
+		sudo apt-get install python3-pip
+		sudo pip3 install -U pip testresources setuptools
+	
+	Install dependencies for Tensorflow:
+		NOTE: The NVIDIA guide asks to first install the dependencies - there is an inconsistency which dependencies should be used between the pages:
+			https://docs.nvidia.com/deeplearning/frameworks/install-tf-jetson-platform-release-notes/tf-jetson-rel.html#tf-jetson-rel
+			https://docs.nvidia.com/deeplearning/frameworks/install-tf-jetson-platform/index.html
+		
+		I've not installed any dependencies, but instead simply let the tensorflow installation (next step) install whaetever version is the latest that is compatible with the TF requirements.
+		This has resulted in these versions:
+		Uninstalling:
+			Successfully uninstalled numpy-1.13.3
+			Successfully uninstalled six-1.11.0
+			Successfully uninstalled requests-2.18.4
+			Successfully uninstalled oauthlib-2.0.6
+			Successfully uninstalled scipy-0.19.1
+		Successfully installed 
+			absl-py-0.10.0 
+			astunparse-1.6.3
+			cachetools-4.1.1
+			gast-0.3.3
+			google-auth-1.21.3
+			google-auth-oauthlib-0.4.1
+			google-pasta-0.2.0
+			grpcio-1.32.0
+			h5py-2.10.0
+			importlib-metadata-2.0.0
+			keras-preprocessing-1.1.2
+			markdown-3.2.2
+			numpy-1.19.2
+			oauthlib-3.1.0
+			opt-einsum-3.3.0
+			pyasn1-0.4.8
+			pyasn1-modules-0.2.8
+			requests-2.24.0
+			requests-oauthlib-1.3.0
+			rsa-4.6
+			scipy-1.4.1
+			six-1.15.0
+			tensorboard-2.2.2
+			tensorboard-plugin-wit-1.7.0
+			tensorflow-2.2.0+nv20.8
+			tensorflow-estimator-2.2.0
+			termcolor-1.1.0
+			werkzeug-1.0.1
+			wrapt-1.12.1
+			zipp-3.2.0		
+	
+		Install tensorflow:	
+			sudo pip3 install --pre --extra-index-url https://developer.download.nvidia.com/compute/redist/jp/v44 tensorflow
+
+- Remove the __init__.py file in protobuf (see __init__.py trap in http://python-notes.curiousefficiency.org/en/latest/python_concepts/import_traps.html)	
+  (otherwise the module cannot be loaded...)
+	sudo  mv  /usr/local/lib/python3.6/dist-packages/protobuf-3.8.0-py3.6-linux-aarch64.egg/google/__init__.py  /usr/local/lib/python3.6/dist-packages/protobuf-3.8.0-py3.6-linux-aarch64.egg/google/__init__.py.old
+
+	
+	
+- Copy the model to jetson (samba share sometimes fails)	.
+
+	- Use cygwin
+	- Speed limit is required as otherwise pipe may break (-l 2000)
+		$ scp -r -l 2000 c:/Users/Roman/Downloads/saved_model.tar.gz roman@192.168.0.10:/home/roman/bricks_model/
+	
+	
+- Power modes:
+	5W: 
+		sudo nvpmodel -m 1
+	10W power mode (default)
+		sudo nvpmodel -m 0	
+	Query:
+		sudo nvpmodel -q
+	
+------
+
+Gstreamer pipelines:
+
+Pipeline to stream to remote with reasonable latency. Note: This encoder is CPU based and uses about 2 cores. Improve this by finding an encoder with GPU support (e.g. nvv4l2h264enc, but getting this to work was unsuccessful so far...)
+		framerate_write=20
+		fourcc=0
+		video_writer=cv2.VideoWriter('appsrc ! videoconvert ! x264enc key-int-max=12 byte-stream=true tune="zerolatency" ! mpegtsmux ! tcpserversink host=0.0.0.0 port=5000 sync=false',fourcc, framerate_write, (cam_width*len(cameras), cam_height))
+		
+		Then, use VLC ctrl-N to open network stream, set caching to a low value to reduce latency on reader side
+		
+Pipeline to read from camera with small latency:
+		pipeline="nvarguscamerasrc sensor_id={} ! video/x-raw(memory:NVMM), width={}, height={}, format=(string)NV12, framerate=(fraction)20/1 ! nvvidconv flip-method=2 ! video/x-raw, format=(string)BGRx ! videoconvert ! video/x-raw, format=(string)BGR ! appsink drop=True".format(c,cam_width,cam_height)
+        cap=cv2.VideoCapture(pipeline)
+
+
+------
+Stop sudo for asking for password all the time:
+    sudo visudo
+    You should never edit /etc/sudoers with a regular text editor, such as Vim or nano, because they do not validate the syntax like the visudo editor.
+    At the end of the /etc/sudoers file add this line:
+    username     ALL=(ALL) NOPASSWD:ALL
+    (username to replace with roman)
+
+------
+	Training the model
+		See: https://github.com/abdelrahman-gaber/tf2-object-detection-api-tutorial
+		
+	Need: protoc:
+	- sudo apt install protobuf-compiler
+	
+	Need object_detection - couldn't find this directly from PyPI, therefore have to create manually from GIT repo:
+	- Create a directory, e.g.: /home/roman/bricks-training/tf/
+	- cd /home/roman/bricks-training/tf/
+	- git clone https://github.com/tensorflow/models.git
+	- cd models/research
+		# compile protos:
+		protoc object_detection/protos/*.proto --python_out=.
+		# Install TensorFlow Object Detection API as a python package:
+		cp object_detection/packages/tf2/setup.py .
+		pip3 install .
+		
+		Note: This took quite a while, and it installed stuff like opencv-python-headless-4.4.0.42.tar.gz, 
+		which may cause openCV to no longer work - as it the original OpenCV version was the good one...
+		
+		Also, it failed with this error:
+		ERROR: Could not find a version that satisfies the requirement tensorflow-addons (from tf-models-official->object-detection==0.1) (from versions: none)
+		ERROR: No matching distribution found for tensorflow-addons (from tf-models-official->object-detection==0.1)
+		
+		setup.py has a note here:
+		# Note: adding apache-beam to required packages causes conflict with
+		# tf-models-offical requirements. These packages request for incompatible
+		# oauth2client package.
+		
+		
+	Notes:
+		- The number of classes must be configured in ssd_mobilenet_v2_bricks.config
+		- Training happens in colab (https://colab.research.google.com/drive/1_wOaYDzm3NyTtXCkLpQNVsHUy_GJ8kBd#scrollTo=jipfjaX_FWFr)
+		- Colab contains a reference to a python file in gDrive tf2_train.py
+		
+
+------
+	TRT optimization:
+	- Can be done via CLI:
+		saved_model_cli convert --dir models/bricks_model/saved_model --output_dir models/bricks_model/saved_model_trt/ --tag_set serve tensorrt --precision_mode FP16
+		
+
+-------
+	Check model with tensorboard:
+	1. Import model into log directory:
+		python3 /usr/local/lib/python3.6/dist-packages/tensorflow/python/tools/import_pb_to_tensorboard.py --model_dir models/bricks_model/saved_model --log_dir /tmp/tensorboardlogs
+		
+	2. Start tensorboard:
+		tensorboard --logdir=/tmp/tensorboardlogs --port 6006 --host 0.0.0.0
+		Note: --host 0.0.0.0 ensures the board is available remotely, not just on localhost
+		
+	3. Point browser to given port
+		http:/192.168.0.10:6006
+		
+
+--------
+	Install ROS and RPLIDAR:
+	
+	Follow instructions here: https://www.hackster.io/shahizat005/getting-started-with-the-low-cost-rplidar-using-jetson-nano-93521d
+	
+	however, one step was broken, and additionally this was required:
+		sudo apt-get install python-rosdep
+			(note should this be instead sudo apt-get install python3-rosdep?)
+
+	Give permanent access to tty port by adding the user to the correct group (e.g. tty or dialout). Find group by ll /dev/tty*
+		usermod -a -G dialout roman
+	or
+		usermod -a -G tty roman
+	
+	To do hectorslam, clone git repo here: 
+		cd ~/catkin_ws/src
+		git clone https://github.com/tu-darmstadt-ros-pkg/hector_slam
+		
+	Modify the tutorial files:
+		copy src/hector_slam/hector_slam_launch/launch/tutorial.launch to src/hector_slam/hector_slam_launch/launch/tutorial_tif.launch and change:
+			<param name="/use_sim_time" value="true"/>
+			to
+			<param name="/use_sim_time" value="false"/>
+			
+			and
+			
+			<include file="$(find hector_mapping)/launch/mapping_tif.launch"/>
+			to
+			<include file="$(find hector_mapping)/launch/mapping_default.launch"/>
+
+		copy src/hector_slam/hector_mapping/launch/mapping_default.launch to src/hector_slam/hector_mapping/launch/mapping_tif.launch and change:
+			<arg name="base_frame" default="base_footprint"/>
+			<arg name="odom_frame" default="nav"/>
+			to
+			<arg name="base_frame" default="base_link"/>
+			<arg name="odom_frame" default="base_link"/>
+
+			and at end add:
+			<node pkg="tf" type="static_transform_publisher" name="base_to_laser_broadcaster" args="0 0 0 0 0 0 base_link laser 100"/>
+		
+	
+	Also need this:
+		sudo apt-get install libqt4-dev
+		
+	hector_slam expects opencv, but we have opencv4. Therefore, need to create a link:
+		cd /usr/include
+		sudo ln -s opencv4 opencv
+		
+	Then run:
+		cd ~/catkin_ws
+		catkin_make
+	
+	Then start:
+		roscore
+		roslaunch rplidar_ros rplidar.launch
+		roslaunch hector_slam_launch tutorial_tif.launch
+		
+		
+
+-------- Additional notes for setting up ROS:
+On desktop:
+    added entries in /etc/hosts to map jetson to ip address 192.168.0.10
+    install the ssh server:
+        sudo apt-get install openssh-server openssh-client
+
+    stop being asked for password when ssh'ing:
+        ssh-keygen -t rsa
+        ssh-copy-id -i ~/.ssh/id_rsa.pub roman@pi4
+
+        Note: For pi4 this worked ok immediately, on jetson I had to do the following tweaks to fix permissions on home directory:
+            chmod g-w ~/
+            chmod o-wx ~/
+
+    in ~/.bashrc, added the setting:
+        export ROS_MASTER_URI=http://jetson:11311
+
+    Created a catkin_ws in ~
+        mkdir catkin_ws
+
+
+    PyCharm:
+        Installed PyCharm
+        Created a project at catkin_ws (from source)
+        To make the generated message files appear in autocomplete, in settings, project structure, mark the following folder as 'src':
+            devel/lib/python2.7/dist-packages
+
+    Get a few modules:
+        git clone https://github.com/ros-teleop/teleop_twist_keyboard.git
+        git clone https://github.com/robopeak/rplidar_ros.git
+        git clone https://github.com/tu-darmstadt-ros-pkg/hector_slam
+        git clone --branch melodic-devel https://github.com/ros-planning/navigation.git
+
+    To build navigation, also need this:
+        sudo apt-get install libsdl-dev
+        sudo apt-get install libsdl-image1.2-dev
+        sudo apt-get install ros-melodic-tf2-sensor-msgs
+
+    Or even better, to resolve all dependency issues, run this command in ~/catkin_ws:
+        rosdep install --from-paths src --ignore-src -r -y
+
+    Issue with roslaunch not able to ssh to jetson: Unable to establish ssh connection to [roman@jetson:22]: Server u'jetson' not found in known_hosts
+    Turns out that an old version (2.0.0) if python package paramiko was installed on desktop, need at least:
+        get pip for python2:
+            sudo apt install python-pip
+        then upgrade paramiko:
+            pip install --upgrade paramiko>2.1.3
+        from the web: I got paramiko (2.7.2), which fixed the issue
+
+    To get odom published from laser scan, we can use
+         git clone https://github.com/MAPIRlab/mapir-ros-pkgs.git
+
+        to make it, we need mrpt:
+            sudo apt-get install mrpt-* (maybe not needed?)
+            sudo apt-get install libmrpt-dev
+
+        note: There is a compatibility issue which I could not resolve - therefore this if2o is bad/unmaintained. Don't touch it
+
+
+On jetson:
+    added roman to dialout to be able to access /dev/ttyUSB0
+        sudo usermod -a -G dialout roman
+
+    added entries in /etc/hosts to map desktop to ip address 192.168.0.20
+    mounted desktop roman home as drive under /mnt/desktop:
+          sudo apt-get install sshfs
+          sudo mkdir /mnt/desktop
+          sudo sshfs -o allow_other roman@desktop:/home/roman /mnt/desktop
+
+    in ~/.bashrc, added the setting:
+        alias mountdesktop='sudo sshfs -o allow_other roman@desktop:/home/roman /mnt/desktop'
+        alias unmountdesktop='sudo umount /mnt/desktop'
+
+    created a symlink to map to catkin_ws on desktop:
+         ln -s /mnt/desktop/catkin_ws/ catkin_ws
+
+    in order to install smbus for Python 2.7, had to first install pip2.7:
+        wget https://bootstrap.pypa.io/get-pip.py
+        sudo python2.7 get-pip.py
+
+    Install smbus for python 2.7, as ROS cannot run python 3.7:
+        pip2.7 install smbus
+
+    To build hector_slam, need qt5 on jetson:
+        sudo apt install qtbase5-dev
+
+    To build navigation, need bullet on jetson:
+        sudo apt-get install libbullet-dev
+        sudo apt-get install libsdl-dev
+        sudo apt-get install libsdl-image1.2-dev
+        sudo apt-get install ros-melodic-tf2-sensor-msgs
+
+    Tensorflow runs on python3 only. However, ros is python2. We can run the tensorflow node by:
+	Change first line in python code as follows:
+	#!/usr/bin/env python3
+
+	    But we need these installed (on the jetson)
+		sudo apt-get install python3-pip python3-yaml
+		sudo pip3 install rospkg catkin_pkg
+	    Alternatively, ROS2 would work with Python3, maybe upgrade to that
+
+Synchronize the time between jetson and desktop:
+    Install chrnoy on desktop and jetson:
+         sudo apt-get install chrony
+
+    On jetson, add the following line:
+        sudo vi /etc/chrony/chrony.conf
+
+        # Manually added roman:
+        server desktop minpoll 0 maxpoll 5 maxdelay .05
+    (Note: this didnt work yet, need more details)
+
+Increase timeout to avoid these errors:
+    hector_slam: (not sure this is still required)
+    In hectormappingros.cpp, increase timeout to 1.0:
+        tf_.waitForTransform(p_odom_frame_, p_base_frame_, scan.header.stamp, ros::Duration(0.5));
+    
+    In goal_functions.cpp, increase timeout from default 0.0 to 0.5:  (later, once AMCL was fixed, turned out this is not required)
+        // tf.transform(global_pose, robot_pose, plan_pose.header.frame_id);
+        tf.transform(global_pose, robot_pose, plan_pose.header.frame_id, ros::Duration(0.5));
+
+Added a new laser filter:
+	Added a new filter LaserScanAngularBoundsFilterNeg which allows setting black out angles
+	Copied the code of the entire laser_filters git repo into my repo https://github.com/rph75/ros/tree/main/laser_filters
+
+Realsense:
+	For ROS: see here: https://github.com/IntelRealSense/realsense-ros/wiki/SLAM-with-D435i
+		sudo apt-get install ros-melodic-realsense2-camera
+		sudo apt-get install ros-melodic-imu-filter-madgwick
+		sudo apt-get install ros-melodic-rtabmap-ros
+		sudo apt-get install ros-melodic-robot-localization
+		
+		Also, need to locally build the octomap visualization plugins: 
+		cd ~/catkin_ws/src
+		git clone https://github.com/OctoMap/octomap_rviz_plugins.git
+		cd ~/catkin_ws
+		catkin_make	
+
+		then launch demo with:: roslaunch realsense2_camera opensource_tracking.launch	
+
+		d
+
+	
+teb local planner:
+	To compile, need:
+		rosdep install teb_local_planner
+		
+		or, alternatively:
+		sudo apt-get install ros-melodic-costmap-converter
+		sudo apt-get install ros-melodic-mbf-costmap-core 
+		sudo apt-get install ros-melodic-mbf-msgs
+		(this worked to build, but then complained about plugin not registered)
+
+		can also do like this:
+		sudo apt-get install ros-melodic-teb-local-planner
+
+
+	The teb_local_planner_ros.cpp needed a fix on this line:
+	    -->     while  (!tf.canTransform (plan_pose.header.frame_id, global_pose.header.frame_id, global_pose.header.stamp, ros::Duration(cfg_.robot.transform_tolerance))) {
+			ros::Duration(0.01).sleep();
+		    }
+	    tf.transform(global_pose, robot_pose, plan_pose.header.frame_id); //transforms input (global_pose) to output (to robot_pose), in the target frame
+
+
+
+Git stuff:
+https://stackoverflow.com/questions/5181845/git-push-existing-repo-to-a-new-and-different-remote-repo-server
+
+Install git GUI client (GitEye)
+	https://tutorialforlinux.com/2017/11/28/giteye-ubuntu-16-10-install-guide/
+	This may require Java:
+		sudo apt install default-jre 
+
+
+
+
+
+PI4:
+	Either flash the full ubuntu desktop image, 20.04.2 LTS
+	or if we only have the ubuntu server image, 18.04.5 LTS, then need these additional steps (see https://qengineering.eu/install-ubuntu-18.04-on-raspberry-pi-4.html)
+		1. configure network access using netplan (see below)
+		2. install the desktop:
+			sudo apt-get update
+			sudo apt-get upgrade
+			sudo apt-get install ubuntu-desktop
+			startx
+		3. create a new user 'roman' in 'settings'. Change password on console:
+			sudo passwd roman
+		4. remove existing user 'ubuntu'
+		5. Change host name from ubuntu to pi4 in
+			/etc/hostname
+			/etc/hosts (if any occurrence)
+			
+
+	install and activate ssh: (when server was intalled, this was already there)
+		sudo apt update
+	 	sudo apt install openssh-server
+		sudo systemctl status ssh
+		sudo ufw allow ssh
+
+
+	Add roman to dialout so it can use /dev/ttyUSB0 for RPLIDAR
+		sudo usermod -a -G dialout roman
+
+	Install ROS:
+		sudo apt upgrade
+		sudo sh -c 'echo "deb http://packages.ros.org/ros/ubuntu $(lsb_release -sc) main" > /etc/apt/sources.list.d/ros-latest.list'
+		sudo apt-key adv --keyserver 'hkp://keyserver.ubuntu.com:80' --recv-key C1CF6E31E6BADE8868B172B4F42ED6FBAB17C654
+
+
+
+network setup:
+	1. Desktop: 192.168.0.20 (configured in routing using MAC address mapping)
+ 		Wired to router
+	2. Jetson: 192.168.0.10 (configured in routing using MAC address mapping)
+		Wifi to router
+		Wired to PI4
+	3. PI4: 
+		Wired to Jetson
+
+	In router:
+		Reserve IP addresses for DHCP based on MAC addresses:
+			jetson mac -> 192.168.0.10
+			desktop mac -> 192.168.0.20
+			a fake mac -> 192.168.0.15  (fake mac is good enough to make sure the address is reserved and not given away to some other mobile device. I've used jetson mac + 1)
+
+	In PI4:
+		In Wired connection:
+			Configure static IP 10.42.0.2, with subnet 255.255.255.0
+			Configure default gateway 10.42.0.1
+
+		Fix DNS lookups in PI4 (would it be possible to hardcode this somehow?):
+			In Pi4 wired connection, disable automatic DNS, and add the following address: 62.2.17.61 
+				(this is the address obtained when running on desktop systemd-resolve --status)
+
+
+		Note: If this is done directly in network manager, it gets lost after reboot. Therefore, this needs to be done using netplan:
+			sudo cp /etc/netplan/10-rpi-ethernet-etho0.yaml  cp /etc/netplan/10-rpi-ethernet-etho0.yaml.bak
+			sudo vi /etc/netplan/10-rpi-ethernet-etho0.yaml
+
+				Under eth0:
+			              match: 
+ 					driver: *leave untouched*
+				      set-name: eth0
+				      dhcp4: no
+				      addresses:
+					- 10.42.0.2/24
+				      gateway4: 10.42.0.1
+				      nameservers:
+					  addresses: [62.2.17.61]
+				      optional: true
+
+			sudo netplan apply
+
+
+	In Jetson:
+		Unlike the pi, here we can use the GUI to do this:
+		In Wifi connection: Add an additional IP address 192.168.0.15 (which serves as the externally visible address of the PI4), on top of 192.168.0.10 which is already assinged by the router
+		In Wired connection
+			Configure static IP 10.42.0.1, netmask 24, no gateway
+
+
+		Configure NAT:
+			Take all incoming traffic on address 192.168.0.15 (i.e. from wifi), and re-route to PI4
+				sudo iptables -t nat -A PREROUTING -d 192.168.0.15 -j DNAT --to-destination 10.42.0.2
+
+			Take all locally generated traffic to address 192.168.0.15 (i.e. from localhost), and re-route to PI4
+				sudo iptables -t nat -A OUTPUT -d 192.168.0.15 -j DNAT --to-destination 10.42.0.2
+
+			Take all outgoing traffic coming on address 10.42.0.2 (the pi4), and pretend it was actually coming from 192.168.0.15 (i.e. from wifi) before sending out
+				sudo iptables -t nat POSTROUTING -s 10.42.0.2  -j DNAT --to-source 192.168.0.15
+
+			Persist the changes:
+				sudo apt install iptables-persistent
+				sudo netfilter-persistent save
+				sudo netfilter-persistent reload
+
+		Activate NAT:
+			temporarily: sudo sysctl net.ipv4.ip_forward=1
+			permanently:
+				vi /etc/sysctl.conf
+				uncomment this line: "#net.ipv4.ip_forward=1"
+
+
+	setup /etc/hosts:
+		desktop:
+			192.168.0.10    jetson
+			192.168.0.15    pi4
+
+		jetson:
+			192.168.0.20    desktop
+			192.168.0.15    pi4
+
+
+		pi4:
+			192.168.0.10	jetson
+			192.168.0.20    desktop
+
+
+Other tips:
+    On desktop, add these aliases to .bashrc, which will make it easy to handle the robot without having to log on:
+
+    #mount all drives (this could be optimized somehow else), and start the ros core on jetson
+    alias robotconfig="ssh jetson 'sudo umount /mnt/desktop; echo *PASSWORD* | sudo sshfs -o allow_other -o password_stdin roman@desktop:/home/roman /mnt/desktop; source ~/catkin_ws/devel/setup.bash; roscore'; ssh pi4 'sudo umount /mnt/desktop; echo *PASSWORD* | sudo sshfs -o allow_other -o password_stdin roman@desktop:/home/roman /mnt/desktop'; ssh -f jetson 'source ~/catkin_ws/devel/setup.bash; roscore'"
+
+    #reset the robot by rebooting pi4 and jetson
+    alias robotreset="ssh pi4 'sudo shutdown -r now';ssh jetson 'sudo shutdown -r now'"
+
+    #shutdown the robot, no reboot
+    alias robotshutdown="ssh pi4 'sudo shutdown now';ssh jetson 'sudo shutdown now'"
+
+
+
+
