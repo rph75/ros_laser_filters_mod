@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-import rospy, math
+import rospy, math, threading
 from geometry_msgs.msg import Twist
 from motorctrl.srv import motorctrl_readpos, motorctrl_readspeed, motorctrl_writepos, motorctrl_writespeed
 from motorctrl.msg import motorctrl_writeentry
@@ -22,17 +22,7 @@ MAX_SPEED=0.15
 #NUM_ACCELERATION_STEPS=5 #Number of steps to compute acceleration (1= one single step, no smoothing)
 
 class Node:
-    def __init__(self):
-        rospy.init_node('speed_ctrl')
-        rospy.loginfo(rospy.get_name() + " Waiting for service /motorctrl_service/* ...")
-        rospy.wait_for_service('/motorctrl_service/readpos')
-        rospy.wait_for_service('/motorctrl_service/readspeed')
-        rospy.wait_for_service('/motorctrl_service/writepos')
-        rospy.wait_for_service('/motorctrl_service/writespeed')
-        rospy.loginfo(rospy.get_name() + " Found service /motorctrl_service/* .")
-        self.writespeed_proxy = rospy.ServiceProxy('motorctrl_service/writespeed', motorctrl_writespeed)
-        rospy.Subscriber("cmd_vel", Twist, self.callback)
-        rospy.loginfo(rospy.get_name() + " subscribed to cmd_vel.")
+
     # # Initialize the node and name it.
     # def callback_with_accel(twist):
     #     #TODO: Something is broken. The speed jumps to top at the first stage - acceleration is not smooth. Deceleration is resonably smooth
@@ -203,41 +193,74 @@ class Node:
         return rospy.Time(secs=time.secs+add_secs,nsecs=time.nsecs+add_nsecs)
 
     def callback(self,twist):
-        now = rospy.Time.now()
-        time = self.add_seconds(now, INTERVAL_SECS)
-        path_speed = twist.linear.x #In m/s
-        ang_speed = twist.angular.z #In rad/s
-        #
-        # Apply the limits for path speed / ang speed
-        path_speed=min(path_speed,MAX_SPEED)
-        path_speed=max(path_speed,-MAX_SPEED)
-        ang_speed=min(ang_speed,MAX_ANG_SPEED)
-        ang_speed=max(ang_speed,-MAX_ANG_SPEED)
+        with self.lock:
+            if self.last_twist is not None:
+                rospy.logdebug(rospy.get_name() + "Received cmd_vel message before previous message was processed")
+            self.last_twist = twist
 
-        #
-        # TODO: This is a very simple approximation to map angular speed and path speed to controller delta and speed
-        # We trust the navigation layer to constantly optimze this if the speed commands do not match the reality
-        # Suggestion for improvements: Use odometry_data.py to get a better approximation
-        controller_speed = path_speed
-        controller_delta = ang_speed / 3.657
-        # send to controller
-        enc_per_sec_left=enc_per_m*(controller_speed-controller_delta)
-        enc_per_sec_right=enc_per_m*(controller_speed+controller_delta)
-        speeds=[
-            enc_per_sec_left,
-            enc_per_sec_left,
-            enc_per_sec_right,
-            enc_per_sec_right
-        ]
-        writespeedentry=motorctrl_writeentry(time=time,target=speeds)
-        writespeedentries=[writespeedentry]
-        try:
-            writespeed_response=self.writespeed_proxy(writespeedentries=writespeedentries)
-        except:
-            #TODO: imprve the recovery behavior
-            self.writespeed_proxy = rospy.ServiceProxy('motorctrl_service/writespeed', motorctrl_writespeed)
-            writespeed_response = self.writespeed_proxy(writespeedentries=writespeedentries)
+    def callback_tim(self,timer_event):
+        # The timer spins quite quickly - and sends the most recent received message to the motor
+        # The point here is to not send the message to the motor on the thread receiving the cmd_vel,
+        # as if the cmd_vel is received quicker than the motor control can process the message,
+        # it will start piling up on the queue
+        twist = None
+        with self.lock:
+            if self.last_twist is not None:
+                twist = self.last_twist
+                self.last_twist = None
+        if twist is not None:
+            #Got a twist - update
+            now = rospy.Time.now()
+            time = now + rospy.Duration(INTERVAL_SECS)
+            path_speed = twist.linear.x  # In m/s
+            ang_speed = twist.angular.z  # In rad/s
+            #
+            # Apply the limits for path speed / ang speed
+            path_speed = min(path_speed, MAX_SPEED)
+            path_speed = max(path_speed, -MAX_SPEED)
+            ang_speed = min(ang_speed, MAX_ANG_SPEED)
+            ang_speed = max(ang_speed, -MAX_ANG_SPEED)
 
+            #
+            # TODO: This is a very simple approximation to map angular speed and path speed to controller delta and speed
+            # We trust the navigation layer to constantly optimze this if the speed commands do not match the reality
+            # Suggestion for improvements: Use odometry_data.py to get a better approximation
+            controller_speed = path_speed
+            controller_delta = ang_speed / 3.657
+            # send to controller
+            enc_per_sec_left = enc_per_m * (controller_speed - controller_delta)
+            enc_per_sec_right = enc_per_m * (controller_speed + controller_delta)
+            speeds = [
+                enc_per_sec_left,
+                enc_per_sec_left,
+                enc_per_sec_right,
+                enc_per_sec_right
+            ]
+            writespeedentry = motorctrl_writeentry(time=time, target=speeds)
+            writespeedentries = [writespeedentry]
+            try:
+                writespeed_response = self.writespeed_proxy(writespeedentries=writespeedentries)
+            except:
+                # TODO: imprve the recovery behavior
+                self.writespeed_proxy = rospy.ServiceProxy('motorctrl_service/writespeed', motorctrl_writespeed)
+                writespeed_response = self.writespeed_proxy(writespeedentries=writespeedentries)
+            duration = rospy.Time.now() - now
+            rospy.logdebug(rospy.get_name() + "Processing cmd_vel message took {} sec".format(duration.to_sec()))
+
+    def __init__(self):
+        self.last_twist = None
+        rospy.init_node('speed_ctrl')
+        rospy.loginfo(rospy.get_name() + " Waiting for service /motorctrl_service/* ...")
+        rospy.wait_for_service('/motorctrl_service/readpos')
+        rospy.wait_for_service('/motorctrl_service/readspeed')
+        rospy.wait_for_service('/motorctrl_service/writepos')
+        rospy.wait_for_service('/motorctrl_service/writespeed')
+        rospy.loginfo(rospy.get_name() + " Found service /motorctrl_service/* .")
+        self.writespeed_proxy = rospy.ServiceProxy('motorctrl_service/writespeed', motorctrl_writespeed)
+        self.lock = threading.Lock()
+        rospy.Subscriber("cmd_vel", Twist, self.callback)
+        rospy.Timer(rospy.Duration.from_sec(0.05), self.callback_tim)
+        rospy.loginfo(rospy.get_name() + " subscribed to cmd_vel.")
 
 # Main function.
 if __name__ == '__main__':
