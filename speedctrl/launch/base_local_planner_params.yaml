@@ -5,7 +5,7 @@
 # navigation going off track. This is now changed and extra messages are discarded
 # The controller takes about 120 ms to process a message. Therefore a controller frequency of 10 Hz
 # is ideal, resulting in a small number of messages being discarded
-controller_frequency: 10.0  #default: 20 (control loop is to plan path on short horizon)
+controller_frequency: 20.0  #default: 20 (control loop is to plan path on short horizon)
 #Setting this to recompute the global plan once per second
 planner_frequency: 1.0  #default: 0 (0 means the global plan is computed only when a goal is set)
 recovery_behavior_enabled: false
@@ -32,8 +32,8 @@ TebLocalPlannerROS:
     #max_vel_theta: 0.23
     max_vel_theta: 0.18
     max_vel_y: 0.0
-    acc_lim_x: 0.1
-    acc_lim_theta: 0.1
+    acc_lim_x: 1.0 #Actually using low accel limit causes the platform to sort of oscillate
+    acc_lim_theta: 1.0
     min_turning_radius: 0.0
     footprint_model: # types: "point", "circular", "two_circles", "line", "polygon"
       type: "polygon"

@@ -1,23 +1,10 @@
 #!/usr/bin/env python
 
 # Still todo:
-# (DONE, TBC) 1. Updating the speed when getting closer to goal does not work - as it seems to reload stuff in move_base, and
-# then sometimes crashes. Instead, maybe send a message to speed_ctrl which limits the speed externally?
 # (DONE, TBC) 2. When goal is aborted, it stays there, always cleaning out map. This must be fixed (maybe it is enough to stop
 # triggering the abort logic once the bricks have been cleaned out
-# (DONE, TBC) 3. When we're close to the brick, sometimes it moves around in circles. This is because it constantly keeps updating
-# the goal, as we're within the 20 cm limit. This needs to be changed to keep the goal fixed. Rather than checking
-# the distance between the new target goal and the previous target goal, (which keeps changing because the attack
-# angle keeps updating, we could instead check the updated distance of the brick itself).
-# 4. When the timer loop here is set to something less than 0.5 secs, the move_base gets into some state 'LOST'
-# to fix this, maybe have to
-# - do not read out goal status too frequently (can test this)
-# - after setting the new goal, wait until the status has updated (as otherwise the wrong status may be read?)
-# but it is unclear why. Ideally we can reduce the loop time, which will help with approaching the brick better?
 # 5. When finding next way point avoid going backwards if the previous one was overshoot because
 # a brick was detected
-# (DONE, TBC) 6. In approaching: when computing time, better max by incorporating the angle as well as part of the speed
-# otherwise when movement is only sidewise and not forwards, it can go too fast.
 
 import numpy as np
 #import cv2 #Must be imported before importing tensorflow, otherwise some strange error god knows why
@@ -100,11 +87,11 @@ GRIPPER_GRIP_TIME= Duration.from_sec(1.5) # time to open/close gripper
 GOAL_STATUS_LOG_INTERVAL = Duration.from_sec(5.0)
 enc_per_m=11500.0 #encoder units per cm #TODO: centralize this value (shared with odom_data)
 
-MAX_DISTANCE_SLOWDOWN = 0.75  # Distance when robot will start slowing down as it is approaching the brick
-MIN_DISTANCE_SLOWDOWN = 0.2  # Distance when robot will have reached minimum speed
+MAX_DISTANCE_SLOWDOWN = 0.50  # Distance when robot will start slowing down as it is approaching the brick
+MIN_DISTANCE_SLOWDOWN = 0.15  # Distance when robot will have reached minimum speed
 MAX_SPEED = 0.21  # Max speed - keep this in line with navigation params
 MAX_ANG_SPEED = 0.18  # Max speed - keep this in line with navigation params
-MIN_SPEED = 0.03  # Min speed, to be used when we get really close to brick / approaching the brick. Must be > penalty_epsilon
+MIN_SPEED = 0.05  # Min speed, to be used when we get really close to brick / approaching the brick. Must be > penalty_epsilon
 MIN_ANG_SPEED = 0.02  # Min angular speed, to be used when approaching
 
 #Tolerance of base_link to waypoint before the target waypoint is updated to the next one
@@ -153,8 +140,12 @@ class Node:
         self.target_brick_pos = None  #Target position of brick, which was used to compute the target_pos
         self.next_idle_waypoint = None
         self.pool = []
+        rospy.loginfo(rospy.get_name() + " Creating move base action client");
         self.move_base_action = actionlib.SimpleActionClient('move_base',MoveBaseAction)
+        rospy.loginfo(rospy.get_name() + " Creating transform listener");
         self.listener = tf.TransformListener()
+        rospy.sleep(1.0) #Fill the transform listener with some data
+        rospy.loginfo(rospy.get_name() + " Waiting for motrctrl service");
         rospy.wait_for_service('/motorctrl_service/writepos')
         self.writepos_proxy = rospy.ServiceProxy('motorctrl_service/writepos', motorctrl_writepos)
         self.readpos_proxy = rospy.ServiceProxy('motorctrl_service/readpos', motorctrl_readpos)
@@ -165,9 +156,11 @@ class Node:
         self.stable_area_pub = rospy.Publisher("stable_area", PolygonStamped, queue_size=10)
         self.gripper_area_pub = rospy.Publisher("gripper_area", PolygonStamped, queue_size=10)
         self.idle_waypoints_pub = rospy.Publisher("idle_waypoints", PoseArray, queue_size=10)
-        interval = rospy.Duration.from_sec(0.5) #If this is too small, we start having issues with set_goal - why?
-        rospy.Timer(interval, self.callback_tim)
+        rospy.loginfo(rospy.get_name() + " Cancelling previous goal");
         self.move_base_action.cancel_goal() #Cancel any previous goal, such that when this node gets started we are clean
+        rospy.loginfo(rospy.get_name() + " starting timer");
+        interval = rospy.Duration.from_sec(0.1) #If this is too small, we start having issues with set_goal - why?
+        rospy.Timer(interval, self.callback_tim)
         rospy.loginfo(rospy.get_name() + " started bricks_tracker_node.")
         rospy.spin()
 
@@ -195,14 +188,15 @@ class Node:
                 self.pool = []
                 self.brick_goal = None
                 self.status = STATUS_IDLE
-
         if current_time > self.log_next_goal_status:
             rospy.loginfo(rospy.get_name() + " move base goal status is {} ({}), state machine is in status {} ".format(goal_status,STATUS_STR[goal_status],self.status))
             self.log_next_goal_status=current_time+GOAL_STATUS_LOG_INTERVAL
 
         # Get the current robot position in the map frame
-        self.listener.waitForTransform("map","gripper", current_time, rospy.Duration.from_sec(10.0))
-        self.listener.waitForTransform("base_link","gripper", current_time, rospy.Duration.from_sec(10.0))
+        # TODO: instead of waiting, it would be nicer to use a tolerance
+        self.listener.waitForTransform("map","gripper", current_time, rospy.Duration.from_sec(0.2))
+        self.listener.waitForTransform("base_link","gripper", current_time, rospy.Duration.from_sec(0.2))
+        self.listener.waitForTransform("map","base_link", current_time, rospy.Duration.from_sec(0.2))
         #pose_map = self.listener.transformPose("map", PoseStamped(header=Header(frame_id = "base_link",stamp=current_time),pose=Pose(position=Point(x=0,y=0,z=0),orientation=Quaternion(0,0,0,1)))).pose;
         pose_gripper_map = self.listener.transformPose("map", PoseStamped(header=Header(frame_id = "gripper",stamp=current_time),pose=Pose(position=Point(x=0,y=0,z=0),orientation=Quaternion(0,0,0,1)))).pose;
         pose_gripper_base = self.listener.transformPose("base_link", PoseStamped(header=Header(frame_id = "gripper",stamp=current_time),pose=Pose(position=Point(x=0,y=0,z=0),orientation=Quaternion(0,0,0,1)))).pose;
@@ -261,7 +255,6 @@ class Node:
                 rospy.loginfo(rospy.get_name() + " Sending goal to move base")
                 self.set_speed(MAX_SPEED)
                 self.move_base_action.send_goal(MoveBaseGoal(target_pose=PoseStamped(header=Header(frame_id="map", stamp=current_time), pose=self.target_pose)))
-                rospy.loginfo(rospy.get_name() + " state after sending goal "+str(self.move_base_action.get_state()))
                 return
             else:
                 # No bricks around - follow an idle path
@@ -287,9 +280,6 @@ class Node:
                     self.next_idle_waypoint = updated_waypoint
                     self.set_speed(MAX_SPEED)
                     self.move_base_action.send_goal(MoveBaseGoal(target_pose=PoseStamped(header=Header(frame_id="map", stamp=current_time),pose=updated_waypoint)))
-                    rospy.loginfo(rospy.get_name() + " state after sending goal "+str(self.move_base_action.get_state()))
-
-                #
                 return
 
         if self.status==STATUS_MOVINGBASE:
@@ -310,7 +300,6 @@ class Node:
                     self.target_pose = target_pose
                     self.target_brick_pos = self.brick_goal.position_map
                     self.move_base_action.send_goal(MoveBaseGoal(target_pose=PoseStamped(header=Header(frame_id="map", stamp=current_time), pose=self.target_pose)))
-                    rospy.loginfo(rospy.get_name() + " state after sending goal "+str(self.move_base_action.get_state()))
                 return
             if goal_status != GoalStatus.SUCCEEDED:
                 # Finished, but with error
@@ -355,7 +344,7 @@ class Node:
                 brick_gripper = self.listener.transformPoint("gripper",brick_cam)
                 #rospy.loginfo(rospy.get_name() + " base coordinates: brick: {}, gripper: {}".format(brick_base.point,pose_gripper_base.position))
                 forward_m = brick_base.point.x - pose_gripper_base.position.x #we simply take the difference in x, don't care for rotation (as rotation is small anyway)
-                if forward_m > 0.05:
+                if abs(forward_m) > 0.05:
                     # To avoid shooting over the target: reduce the forward in case we're not approaching really closely
                     forward_m = forward_m * 0.8
                 alpha_rad = math.atan2(brick_base.point.y, brick_base.point.x) - math.atan2(pose_gripper_base.position.y,pose_gripper_base.position.x)  # in rad
@@ -371,13 +360,13 @@ class Node:
                     readpos_reply.encoder[3] + forward_enc + delta_enc
                 ]
                 #Set the time to such that speed is MIN_SPEED, MIN_ANG_SPEED
-                time = Duration(max(forward_m/MIN_SPEED,alpha_rad/MIN_ANG_SPEED,0.5))
+                duration = Duration(max(abs(forward_m)/MIN_SPEED,abs(alpha_rad)/MIN_ANG_SPEED,0.5))
                 #Use the time as an offset on the received time (microcontroller may be slightly offset)
-                writeposentry = motorctrl_writeentry(time=readpos_reply.time + time, target=positions_enc)
+                writeposentry = motorctrl_writeentry(time=readpos_reply.time + duration, target=positions_enc)
                 writeposentries = [writeposentry]
                 self.writepos_proxy(writeposentries=writeposentries)
                 # add some time to get mecanicaally stable once movement has finished
-                self.wait_until = current_time + time + Duration(0.3)
+                self.wait_until = current_time + duration + Duration(0.3)
             return
 
         if self.status == STATUS_GRIPPER_LOWERING:
