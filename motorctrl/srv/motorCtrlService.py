@@ -21,6 +21,9 @@ kp = 600
 ki = 20
 kd = 0
 quotient = 100  # P,I,D are scaled by factor 100
+
+#TODO: Currently we set all params for position to 0 - this means position will be controlled using speed,
+#and final pos adjustment is disabled
 timePID_pos = 200
 kp_pos = 0
 ki_pos = 0
@@ -31,6 +34,8 @@ motor_now_ms = -1  # Difference of motor time to current time (current time - mo
 
 default_pos = 0.25 # Servo position when gripper is up (default position)
 
+accel_interval = 50 #How often to check the acceleration (in ms) - too low value may result in oscillation
+max_accel = 12000 # max acceleration (in enc per sec^2)
 
 def readspeed(request):
     # TODO: Exception handling
@@ -196,6 +201,7 @@ def initController():
     rospy.loginfo(rospy.get_name() + " Initializing controller")
     set_motor_pwm(motorPwmFreq)
     set_motor_timeout(motorTimeout)
+    set_max_accel(accel_interval,max_accel)
     upload_pid(timePID,quotient,kp,ki,kd,timePID_pos,quotient_pos,kp_pos,ki_pos,kd_pos)
     #TODO: Periodically update the time offset, as there may be a drift in micro controller time
     get_time_offset()
@@ -208,6 +214,16 @@ def set_motor_pwm(freq):
     i2c_response=i2c_frame_proxy(address=MOTORCTRL_ADDRESS,req_data=payload)
     reply_data=i2c_response.resp_data
     verify_reply_length(reply_data,0)
+
+def set_max_accel(interval,accel):
+    payload = [0xfc]  # Write max accel
+    append_int(payload, interval)
+    append_int(payload, accel)
+    i2c_frame_proxy = rospy.ServiceProxy('/i2c_service/frame', i2c_frame)
+    i2c_response=i2c_frame_proxy(address=MOTORCTRL_ADDRESS,req_data=payload)
+    reply_data=i2c_response.resp_data
+    verify_reply_length(reply_data,0)
+
 
 def set_motor_timeout(timeout):
     payload = [0xf8]  # Write motor timeout

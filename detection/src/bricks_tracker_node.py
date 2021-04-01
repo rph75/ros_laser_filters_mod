@@ -346,6 +346,7 @@ class Node:
                 forward_m = brick_base.point.x - pose_gripper_base.position.x #we simply take the difference in x, don't care for rotation (as rotation is small anyway)
                 if abs(forward_m) > 0.05:
                     # To avoid shooting over the target: reduce the forward in case we're not approaching really closely
+                    # This will help also because there is a max acceleration, which would typically lead to overshoot
                     forward_m = forward_m * 0.8
                 alpha_rad = math.atan2(brick_base.point.y, brick_base.point.x) - math.atan2(pose_gripper_base.position.y,pose_gripper_base.position.x)  # in rad
                 delta_m= alpha_rad / 3.657 #Approximation. TODO: Clean up / merge with speed control one

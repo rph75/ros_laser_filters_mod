@@ -115,8 +115,8 @@ class Node:
         self.last_encoder=None
         self.topub_x=None
         self.converter = Converter()
-        rospy.Timer(rospy.Duration.from_sec(1.0/10), self.callback_update)   #Measurement rate
-        rospy.Timer(rospy.Duration.from_sec(1.0/20), self.callback_publish)  #Publish rate
+        rospy.Timer(rospy.Duration.from_sec(1./10), self.callback_update)   #Measurement rate
+        rospy.Timer(rospy.Duration.from_sec(1./20), self.callback_publish)  #Publish rate
         rospy.loginfo(rospy.get_name() + " started odom_node.")
         rospy.spin()
 

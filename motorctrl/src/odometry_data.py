@@ -2,7 +2,7 @@ import math
 import bisect
 import numpy as np
 import matplotlib.pyplot as plt
-enc_per_m=11500.0 #encoder units per cm #TODO: centralize this value (shared with speedctrl)
+enc_per_m=11500.0 #encoder units per cm
 
 
 

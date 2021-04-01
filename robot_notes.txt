@@ -558,6 +558,8 @@ Install git GUI client (GitEye)
 		sudo apt install default-jre 
 
 
+UART / serial port on jetson:
+    sudo cat /dev/ttyTHS1
 
 
 
